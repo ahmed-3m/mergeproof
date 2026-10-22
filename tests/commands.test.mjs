@@ -5,9 +5,10 @@ import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync } from 'node:fs';
 import { createRepo, testFile, FIXED_MATH, BASE_FILES } from './fixtures/repo.mjs';
-import { runCheck, defaultDeps as checkDeps } from '../src/commands/check.mjs';
+import { runCheck, evaluate, defaultDeps as checkDeps } from '../src/commands/check.mjs';
 import { runSync, settle, defaultDeps as syncDeps } from '../src/commands/sync.mjs';
 import { checksState, normalizePr, parsePrUrl } from '../src/adapters/gh.mjs';
+import { parseConfig } from '../src/config.mjs';
 import { emptyLedger, readLedger, writeLedger, LEDGER_SCHEMA } from '../src/ledger.mjs';
 import { parseTrailer } from '../src/trailer.mjs';
 
@@ -225,6 +226,59 @@ test('check --local runs end to end through the CLI', () => {
     assert.equal(res.status, 4, res.stdout + res.stderr);
     assert.match(res.stdout, /HUMAN \(kind: feature\)[\s\S]*feature for claude-code\/glm-5.2 not trusted yet[\s\S]*fail on base 2\/2/);
     assert.match(res.stdout, /\(local\)/);
+  } finally {
+    repo.cleanup();
+  }
+});
+
+test('a refactor that makes generated test cases disappear is tampering', () => {
+  // The suite builds its cases from a list in src/, so deleting an entry makes
+  // a test disappear without touching a test file. node --test reports
+  // "ℹ tests 2" on base and "ℹ tests 1" on head.
+  const generated = [
+    "import { test } from 'node:test';",
+    "import assert from 'node:assert/strict';",
+    "import { add } from '../src/math.mjs';",
+    "import { cases } from '../src/cases.mjs';",
+    '',
+    'for (const [a, b, sum] of cases) {',
+    "  test(`add(${a}, ${b})`, () => {",
+    '    assert.equal(add(a, b), sum);',
+    '  });',
+    '}',
+    '',
+  ].join('\n');
+  const repo = createRepo({
+    ...BASE_FILES,
+    'tests/add.test.mjs': null,
+    'src/cases.mjs': 'export const cases = [[1, 1, 2], [2, 2, 4]];\n',
+    'tests/cases.test.mjs': generated,
+  });
+  try {
+    const baseSha = repo.git(['rev-parse', 'HEAD']);
+    repo.branch('agent/refactor').write({ 'src/cases.mjs': 'export const cases = [[1, 1, 2]];\n' });
+    const headSha = repo.commit('refactor: fewer cases');
+    const result = evaluate(
+      {
+        root: repo.dir,
+        baseSha,
+        headSha,
+        config: parseConfig(repo.git(['show', `${baseSha}:.mergeproof.json`])),
+        claims: { subjects: ['refactor: fewer cases'] },
+        ci: null,
+        issueLabels: [],
+        agent: 'claude-code',
+        model: 'glm-5.2',
+        ledger: readLedger(DEMO),
+      },
+      checkDeps,
+    );
+    const why = JSON.stringify(result.verdict);
+    assert.equal(result.verdict.verdict, 'HUMAN', why);
+    assert.ok(result.verdict.notes.some((n) => /test count dropped from 2/.test(n.text)), why);
+    assert.deepEqual(result.tamperNotes.map((n) => n.rule), ['testCountDropped']);
+    assert.equal(result.proof.ok, false, 'a tampered PR is never recorded in the ledger');
+    assert.equal(repo.git(['worktree', 'list']).split('\n').length, 1, 'proof worktrees are cleaned up');
   } finally {
     repo.cleanup();
   }

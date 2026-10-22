@@ -37,7 +37,7 @@ const CONTRACT = {
   'src/adapters/process.mjs': ['runProcess'],
   'src/adapters/git.mjs': ['changedFiles', 'changedPaths', 'diff', 'addedLines', 'addWorktree', 'removeWorktree', 'commonDir', 'log'],
   'src/adapters/gh.mjs': ['getPullRequest', 'getChecksStatus', 'issueLabels', 'squashMerge', 'comment', 'createIssue'],
-  'src/adapters/runner.mjs': ['runTests'],
+  'src/adapters/runner.mjs': ['runTests', 'parseTestCount'],
 };
 
 for (const [file, names] of Object.entries(CONTRACT)) {

@@ -9,9 +9,8 @@ import { matchesAny } from './glob.mjs';
 //   config,
 // }
 // Each rule is a function (ctx) => text | null so rules stay pluggable
-// (brief RISK: agents adapt to known rules). A dropped test count is covered by
-// the edited/deleted rules while proof runs per file; counting individual cases
-// needs per-runner output parsing and comes later.
+// (brief RISK: agents adapt to known rules). A dropped test-case count is not
+// a path rule: prove.mjs finds it by counting cases in the suite output.
 
 // Paths mergeproof hands to child processes; anything else could smuggle shell syntax
 // through the Windows .cmd shim path (CVE-2024-27980). No leading dash, so a

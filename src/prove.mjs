@@ -4,43 +4,54 @@ import { matchesAny } from './glob.mjs';
 // Proof required per kind (PROTOTYPE.md flow 2):
 //   feature, bugfix  new test files fail on base (baseFailRuns/baseFailRuns, new tests only)
 //                    and pass on head (headPassRuns/headPassRuns)
-//   refactor         zero test-file changes; full suite green on base and head
+//   refactor         zero test-file changes; full suite green on base and head,
+//                    and the counted test cases must not drop (testCountDropped)
 //   docs             only docs paths changed
 //   deps             only manifests and lockfiles changed (never auto-merged, so no tests run)
 // Every kind also needs CI green. Without a CI result (local preflight, or a repo
 // with no checks) the full suite runs on head instead, with proof.headReruns
-// reruns before a failure counts.
+// reruns before a failure counts. A refactor always runs the head suite, even
+// with CI: flow 2 needs green on base and head, and the case count is compared.
 //
 // ctx: {
 //   files: [{ path, status }], config,
 //   ci: 'green' | 'red' | 'pending' | 'none' | null,
-//   runBase(files | null) => { passed: string[], failed: string[] },  null = full suite
-//   runHead(files | null) => { passed: string[], failed: string[] },
-// }
+//   runBase(files | null) => { passed: string[], failed: string[], count?: number|null },  null = full suite
+//   runHead(files | null) => { passed: string[], failed: string[], count?: number|null },
+// }                                                                          count: full-suite runs only,
+//                                                                           null/absent when the output doesn't parse
 // Result: ok (proof holds), weak (the agent can fix it: RETRY), or neither
 // (the gate can't prove anything, e.g. the suite is already red on base: HUMAN).
+// tamperNotes is what the proof found out about the PR's honesty (a dropped
+// test count); evaluate() turns it into HUMAN with no retry.
 
 const pass = (text) => ({ ok: true, text });
 const fail = (text) => ({ ok: false, text });
 
-function result(notes, { blocked = false } = {}) {
-  const failed = notes.some((n) => !n.ok);
-  return { ok: !failed, weak: failed && !blocked, notes };
+function result(notes, { blocked = false, tamperNotes = [] } = {}) {
+  // Tampering is never weak: a retry would only teach better cheating.
+  const failed = notes.some((n) => !n.ok) || tamperNotes.length > 0;
+  return { ok: !failed, weak: failed && !blocked && tamperNotes.length === 0, notes, tamperNotes };
 }
 
-// Runs the full suite on head up to 1 + headReruns times; true once it passes.
-function headSuiteGreen(ctx) {
+// Runs the full suite on head up to 1 + headReruns times; the first green run
+// (or the last one) decides, and its case count is kept for the drop check.
+function headSuite(ctx) {
+  let run = null;
   for (let i = 0; i <= ctx.config.proof.headReruns; i++) {
-    if (ctx.runHead(null).failed.length === 0) return true;
+    run = ctx.runHead(null);
+    if (run.failed.length === 0) return { green: true, run };
   }
-  return false;
+  return { green: false, run };
 }
 
-function ciNote(ctx) {
+// `head` reuses an already-run head suite instead of running it again.
+function ciNote(ctx, head = null) {
   if (ctx.ci === 'green') return pass('CI green');
   if (ctx.ci === 'red') return fail('CI is red');
   if (ctx.ci === 'pending') return fail('CI has not finished');
-  return headSuiteGreen(ctx) ? pass('full suite green on head') : fail('full suite fails on head');
+  const suite = head ?? headSuite(ctx);
+  return suite.green ? pass('full suite green on head') : fail('full suite fails on head');
 }
 
 function proveNewTests(ctx) {
@@ -75,7 +86,8 @@ function proveNewTests(ctx) {
   return [pass(`${n} fail on base ${baseFailRuns}/${baseFailRuns} and pass on head ${headPassRuns}/${headPassRuns}`)];
 }
 
-/** @returns {{ ok: boolean, weak: boolean, notes: Array<{ ok: boolean, text: string }> }} */
+/** @returns {{ ok: boolean, weak: boolean, notes: Array<{ ok: boolean, text: string }>,
+ *              tamperNotes: Array<{ ok: false, rule: string, text: string }> }} */
 export function proveChange(kind, ctx) {
   const b = bucketPaths(ctx.files.map((f) => f.path), ctx.config);
   switch (kind) {
@@ -89,10 +101,21 @@ export function proveChange(kind, ctx) {
       return result([pass('only docs changed'), ciNote(ctx)]);
     case 'refactor': {
       if (b.tests.length > 0) return result([fail('a refactor must not change test files')]);
-      if (ctx.runBase(null).failed.length > 0) {
+      const base = ctx.runBase(null);
+      if (base.failed.length > 0) {
         return result([fail('full suite already fails on base, so a refactor cannot be proven')], { blocked: true });
       }
-      return result([pass('no test changes; full suite green on base'), ciNote(ctx)]);
+      // Green on base and head, and head must not run fewer cases: a refactor
+      // can make tests disappear without touching a test file, e.g. by
+      // deleting entries of a list in src/ the tests generate cases from.
+      const head = headSuite(ctx);
+      const notes = [pass('no test changes; full suite green on base')];
+      notes.push(head.green ? ciNote(ctx, head) : fail('full suite fails on head'));
+      const dropped =
+        base.count != null && head.run.count != null && head.run.count < base.count
+          ? [{ ok: false, rule: 'testCountDropped', text: `test count dropped from ${base.count} on base to ${head.run.count} on head` }]
+          : [];
+      return result(notes, { tamperNotes: dropped }); // unknown counts: no note, any runner works
     }
     case 'feature':
     case 'bugfix': {

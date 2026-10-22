@@ -5,6 +5,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ## [Unreleased]
 
 ### Added
+- Refactor proof now runs the full suite on head as well (green on base and head, per flow 2) and compares test-case counts, parsed from node:test (spec/TAP), jest, vitest and pytest output: fewer cases on head than base is the `testCountDropped` tamper rule, so a refactor can no longer make tests disappear by deleting the data they generate from. Counts that don't parse are skipped, so unknown runners keep working.
 - M1 gate: `check <pr-url>` and `check --local` run classify → tamper → prove → decide. Per-kind proof runs in throwaway git worktrees: new test files must fail on base 2/2 and pass on head 3/3. Enforce mode merges pinned to the proven head with a `Mergeproof-Verdict` trailer. Every proven PR is logged to `.mergeproof/ledger.json`, so human merges earn trust too.
 - `sync` settles the ledger (open → pending → clean or reverted) and opens a human-triage issue for each revert.
 - Config is `.mergeproof.json` (YAML later), validated strictly and read from the base commit. New keys: `testFileCommand`, `issueLabels.bugfix`, `limits.testTimeoutSec`.

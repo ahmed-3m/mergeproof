@@ -72,18 +72,25 @@ test('lockfile lines do not count toward the diff limit', () => {
   assert.deepEqual(rules(tamperCtx({ kind: 'deps', files, claims: {} })), []);
 });
 
-// Fake runners: `outcomes` maps a test file to its result per call, e.g. ['fail', 'pass'].
+// Fake runners: `outcomes` maps a test file to its result per call, e.g.
+// ['fail', 'pass'], or an object { pass, count } whose count mimics a parsed
+// full-suite summary (null = a runner whose output doesn't parse).
 function runner(script) {
   const calls = {};
   return (files) => {
     const passed = [];
     const failed = [];
+    let count;
     for (const f of files ?? ['(suite)']) {
       const seq = script[f] ?? ['pass'];
       const i = (calls[f] = (calls[f] ?? -1) + 1);
-      (seq[Math.min(i, seq.length - 1)] === 'pass' ? passed : failed).push(f);
+      const r = seq[Math.min(i, seq.length - 1)];
+      if (r && typeof r === 'object') {
+        if ('count' in r) count = r.count;
+        (r.pass ? passed : failed).push(f);
+      } else (r === 'pass' ? passed : failed).push(f);
     }
-    return { passed, failed };
+    return count === undefined ? { passed, failed } : { passed, failed, count };
   };
 }
 
@@ -134,6 +141,29 @@ test('without CI the full suite runs on head, with one rerun', () => {
 test('refactor on a red base cannot be proven, which is not the agent fault', () => {
   const p = proveChange('refactor', proveCtx({ files: [{ path: 'src/a.js', status: 'M' }], base: { '(suite)': ['fail'] } }));
   assert.deepEqual([p.ok, p.weak], [false, false]);
+});
+
+test('refactor compares test-case counts between base and head', () => {
+  const files = [{ path: 'src/a.js', status: 'M' }];
+  const ctx = (base, head) => proveCtx({ files, ci: 'green', base, head });
+  const same = proveChange('refactor', ctx({ '(suite)': [{ pass: true, count: 4 }] }, { '(suite)': [{ pass: true, count: 4 }] }));
+  assert.deepEqual([same.ok, same.tamperNotes], [true, []], 'an equal count proves nothing new');
+  const dropped = proveChange('refactor', ctx({ '(suite)': [{ pass: true, count: 2 }] }, { '(suite)': [{ pass: true, count: 1 }] }));
+  assert.deepEqual([dropped.ok, dropped.weak], [false, false], 'tampering is not weak, so there is no retry');
+  assert.deepEqual(dropped.tamperNotes, [{ ok: false, rule: 'testCountDropped', text: 'test count dropped from 2 on base to 1 on head' }]);
+  const unknown = proveChange('refactor', ctx({ '(suite)': ['pass'] }, { '(suite)': [{ pass: true, count: null }] }));
+  assert.deepEqual([unknown.ok, unknown.tamperNotes], [true, []], 'unknown counts keep unknown runners working');
+});
+
+test('refactor runs the head suite even when CI is green; red head stays weak', () => {
+  const files = [{ path: 'src/a.js', status: 'M' }];
+  let headRuns = 0;
+  const p = proveChange('refactor', { files, config: cfg, ci: 'green', runBase: runner({}), runHead: () => (headRuns++, { passed: ['(suite)'], failed: [], count: 3 }) });
+  assert.equal(headRuns, 1, 'the CI note reuses the head run instead of running the suite twice');
+  assert.equal(p.ok, true);
+  const red = proveChange('refactor', { files, config: cfg, ci: 'green', runBase: runner({}), runHead: () => ({ passed: [], failed: ['(suite)'], count: 3 }) });
+  assert.equal(red.weak, true);
+  assert.ok(red.notes.some((n) => !n.ok && /full suite fails on head/.test(n.text)));
 });
 
 test('docs and deps proofs need no test runs', () => {
