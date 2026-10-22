@@ -11,6 +11,11 @@ export function parseFlags(argv, booleanFlags, valueFlags = []) {
   const positionals = [];
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
+    if (arg === '--') {
+      // The POSIX end-of-flags marker: everything after it is positional.
+      positionals.push(...argv.slice(i + 1));
+      break;
+    }
     if (!arg.startsWith('--')) {
       positionals.push(arg);
       continue;

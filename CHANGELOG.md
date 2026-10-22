@@ -5,6 +5,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ## [Unreleased]
 
 ### Fixed
+- CLI and adapter edges: `--` ends flag parsing instead of erroring; PR URLs with browser suffixes (`/files`, `?w=1`, `#fragment`) parse; and the proof-run fingerprint now also covers `.git`'s `refs/`, `HEAD`, `packed-refs` and `objects/info/alternates`, closing the same shared-`.git` write class as hooks and config.
 - `check` in `mode: off` no longer comments on the PR: off now means off for both halves of the split (apply already wrote nothing).
 - `sync` opens the human-triage regression issues before settling the ledger: a failed issue creation used to mark the outcome reverted on disk anyway, permanently losing the triage issue; now the outcome stays pending and the next sync retries it (the residual failure mode is a visible duplicate issue).
 - Git diff prefixes are pinned (`diff.noprefix=false`, `diff.mnemonicPrefix=false`, `srcPrefix`/`dstPrefix`): a machine's noprefix setting emitted `+++` headers the added-line parser misread, corrupting skip-marker note paths.

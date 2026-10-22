@@ -50,3 +50,12 @@ test('runtime failures exit 1 with a one-line reason, not a stack trace', () => 
   assert.match(res.stderr, /^mergeproof check: git rev-parse failed/);
   assert.doesNotMatch(res.stderr, /\n\s+at /);
 });
+
+test('PR URLs with browser suffixes parse', async () => {
+  const { parsePrUrl } = await import('../src/adapters/gh.mjs');
+  assert.deepEqual(parsePrUrl('https://github.com/acme/app/pull/42/files'), { host: 'github.com', repo: 'acme/app', number: 42 });
+  assert.deepEqual(parsePrUrl('https://github.com/acme/app/pull/42?w=1'), { host: 'github.com', repo: 'acme/app', number: 42 });
+  assert.deepEqual(parsePrUrl('https://github.com/acme/app/pull/42#discussion'), { host: 'github.com', repo: 'acme/app', number: 42 });
+  assert.equal(parsePrUrl('https://github.com/acme/app/issues/42'), null);
+  assert.equal(parsePrUrl('https://github.com/acme/app/pull/42evil'), null);
+});
