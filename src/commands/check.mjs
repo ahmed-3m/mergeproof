@@ -175,8 +175,9 @@ export async function runCheck(argv, deps = defaultDeps) {
   // the CI'd commit, proven false — so apply's moved-head refusal supersedes
   // this run with nothing written: no label, no comment, no merge.
   if (pr && flags.head !== null && pr.headSha !== flags.head) {
-    const baseSha = deps.git.mergeBase(root, input.configSha, flags.head);
-    const { kind } = inspect({ root, baseSha, headSha: flags.head, config, claims: input.claims, issueLabels: input.issueLabels }, deps);
+    // No kind: the CI'd commit may be gone after a force-push, and apply
+    // refuses a moved head before it reads anything else from the file.
+    const kind = null;
     const verdict = makeVerdict('HUMAN', { kind, notes: [{ ok: false, text: 'PR changed after its CI completed; the new head gets its own gate run' }] });
     if (flags['verdict-out'] !== null) {
       writeVerdictFile(resolve(deps.cwd(), flags['verdict-out']), {

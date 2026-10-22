@@ -4,8 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
-### Added
-- Nothing yet.
+### Fixed
+- `check --head` stands down without reading the CI'd commit: after a force-push that commit may be gone, so the superseded verdict carries no kind instead of crashing in the diff.
 
 ## [0.1.0] - 2026-10-23
 
