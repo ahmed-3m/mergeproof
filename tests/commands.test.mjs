@@ -14,17 +14,20 @@ import { parseTrailer } from '../src/trailer.mjs';
 const URL = 'https://github.com/acme/app/pull/77';
 const DEMO = resolve('demo/ledger.json');
 
-function fakeGh(repo, { headSha, baseSha, author = 'agent-bot', headRef = 'agent/fix', labels = ['bug'], checks = [] }) {
-  const calls = { merge: [], comment: [], issue: [] };
+function fakeGh(repo, { headSha, baseSha, author = 'agent-bot', headRef = 'agent/fix', isFork = false, labels = ['bug'], checks = [] }) {
+  const calls = { merge: [], comment: [], issue: [], issueLabels: [] };
   let merged = null;
   return {
     calls,
     parsePrUrl,
     getPullRequest: () => ({
       number: 77, url: URL, title: 'fix: mul by 3', author, state: merged ? 'MERGED' : 'OPEN', headRef, headSha, baseRef: 'main', baseSha,
-      labels: [], subjects: ['fix: mul by 3'], linkedIssues: [3], mergeCommit: merged, mergedAt: merged ? '2026-10-22T12:00:00Z' : null, checks,
+      labels: [], subjects: ['fix: mul by 3'], isFork, mergeCommit: merged, mergedAt: merged ? '2026-10-22T12:00:00Z' : null, checks,
     }),
-    issueLabels: () => labels,
+    issueLabels: (url, numbers) => {
+      calls.issueLabels.push(numbers);
+      return labels;
+    },
     squashMerge: (url, opts) => {
       calls.merge.push(opts);
       merged = 'f'.repeat(40);
@@ -35,7 +38,8 @@ function fakeGh(repo, { headSha, baseSha, author = 'agent-bot', headRef = 'agent
 }
 
 function setup(config = {}) {
-  const repo = createRepo({ ...BASE_FILES, '.mergeproof.json': JSON.stringify({ testCommand: 'node --test', testFileCommand: 'node --test', ...config }) });
+  const gate = { testCommand: 'node --test', testFileCommand: 'node --test', agents: { logins: ['agent-bot'], branchPrefixes: ['agent/'] }, ...config };
+  const repo = createRepo({ ...BASE_FILES, '.mergeproof.json': JSON.stringify(gate) });
   const baseSha = repo.git(['rev-parse', 'HEAD']);
   repo.branch('agent/fix').write({ 'src/math.mjs': FIXED_MATH, 'tests/mul.test.mjs': testFile('mul by 3', ['assert.equal(mul(3, 2), 6);']) });
   const headSha = repo.commit('fix: mul by 3');
@@ -58,13 +62,15 @@ function deps(repo, gh, out) {
 }
 
 const AGENT = ['--agent', 'claude-code', '--model', 'glm-5.2', '--skill', 'bugfix@1'];
+// The issue the workflow dispatched the agent for; its maintainer label makes the PR a bugfix.
+const PR_ARGS = [...AGENT, '--issue', '3'];
 
 test('enforce mode merges a proven, trusted PR with a trailer and logs it', async () => {
   const { repo, baseSha, headSha, ledger } = setup({ mode: 'enforce' });
   try {
     const gh = fakeGh(repo, { baseSha, headSha, checks: [{ name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' }] });
     const out = [];
-    const code = await runCheck([URL, ...AGENT], deps(repo, gh, out));
+    const code = await runCheck([URL, ...PR_ARGS], deps(repo, gh, out));
     assert.equal(code, 0, out.join('\n'));
     assert.equal(gh.calls.merge.length, 1);
     assert.equal(gh.calls.merge[0].headSha, headSha, 'merge is pinned to the proven commit');
@@ -85,7 +91,7 @@ test('shadow mode reports MERGE but never merges, and logs the PR as open', asyn
   try {
     const gh = fakeGh(repo, { baseSha, headSha, checks: [{ name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' }] });
     const out = [];
-    assert.equal(await runCheck([URL, ...AGENT, '--json'], deps(repo, gh, out)), 0);
+    assert.equal(await runCheck([URL, ...PR_ARGS, '--json'], deps(repo, gh, out)), 0);
     assert.equal(gh.calls.merge.length, 0);
     assert.deepEqual(JSON.parse(out[0]).merged, false);
     assert.equal(JSON.parse(out[0]).mode, 'shadow');
@@ -99,7 +105,7 @@ test('--dry-run never merges, comments or writes the ledger', async () => {
   const { repo, baseSha, headSha, ledger } = setup({ mode: 'enforce' });
   try {
     const gh = fakeGh(repo, { baseSha, headSha, checks: [{ name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' }] });
-    assert.equal(await runCheck([URL, ...AGENT, '--dry-run'], deps(repo, gh, [])), 0);
+    assert.equal(await runCheck([URL, ...PR_ARGS, '--dry-run'], deps(repo, gh, [])), 0);
     assert.deepEqual([gh.calls.merge.length, gh.calls.comment.length], [0, 0]);
     assert.equal(readLedger(ledger).outcomes.length, 20);
   } finally {
@@ -107,17 +113,20 @@ test('--dry-run never merges, comments or writes the ledger', async () => {
   }
 });
 
-test('red CI is weak proof, a human PR goes to a human, and off mode merges nothing', async () => {
+test('red CI is weak proof; human, spoofed and fork PRs go to a human; off mode merges nothing', async () => {
   for (const [config, ghOpts, expected, note] of [
     [{ mode: 'enforce' }, { checks: [{ name: 'test', status: 'COMPLETED', conclusion: 'FAILURE' }] }, 3, /CI is red/],
     [{ mode: 'enforce' }, { author: 'alice', headRef: 'feature/x' }, 4, /not an agent PR/],
+    [{ mode: 'enforce' }, { author: 'alice', headRef: 'agent/fix' }, 4, /author alice is not in agents.logins/],
+    [{ mode: 'enforce' }, { isFork: true }, 4, /PR comes from a fork/],
+    [{ mode: 'enforce' }, { headRef: 'feature/x' }, 4, /agent branch feature\/x does not start with agent\//],
     [{ mode: 'off' }, {}, 4, /mergeproof is off/],
   ]) {
     const { repo, baseSha, headSha } = setup(config);
     try {
       const gh = fakeGh(repo, { baseSha, headSha, ...ghOpts });
       const out = [];
-      assert.equal(await runCheck([URL, ...AGENT], deps(repo, gh, out)), expected, out.join('\n'));
+      assert.equal(await runCheck([URL, ...PR_ARGS], deps(repo, gh, out)), expected, out.join('\n'));
       assert.match(out[0], note);
       assert.equal(gh.calls.merge.length, 0);
     } finally {
@@ -134,8 +143,67 @@ test('the PR cannot loosen its own gate: config is read from base', async () => 
     const headSha = repo.commit('chore: tune');
     const gh = fakeGh(repo, { baseSha, headSha });
     const out = [];
-    assert.equal(await runCheck([URL, ...AGENT], deps(repo, gh, out)), 4);
+    assert.equal(await runCheck([URL, ...PR_ARGS], deps(repo, gh, out)), 4);
     assert.match(out[0], /edits gate file .mergeproof.json/);
+  } finally {
+    repo.cleanup();
+  }
+});
+
+test('config comes from the base tip, not the older merge-base the PR branched from', async () => {
+  const { repo, headSha } = setup({ mode: 'enforce' });
+  try {
+    repo.write({ '.mergeproof.json': JSON.stringify({ mode: 'off' }) });
+    const tip = repo.commit('chore: pause the gate');
+    const gh = fakeGh(repo, { baseSha: tip, headSha, checks: [{ name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' }] });
+    const out = [];
+    assert.equal(await runCheck([URL, ...PR_ARGS], deps(repo, gh, out)), 4);
+    assert.match(out[0], /mergeproof is off/);
+    assert.equal(gh.calls.merge.length, 0);
+  } finally {
+    repo.cleanup();
+  }
+});
+
+test('the bugfix issue comes only from --issue, never from the PR', async () => {
+  const { repo, baseSha, headSha } = setup({ mode: 'enforce' });
+  try {
+    const gh = fakeGh(repo, { baseSha, headSha, checks: [{ name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' }] });
+    const out = [];
+    // Without --issue the PR is a feature, which the demo ledger hasn't trusted yet.
+    assert.equal(await runCheck([URL, ...AGENT, '--dry-run'], deps(repo, gh, out)), 4);
+    assert.match(out[0], /HUMAN \(kind: feature\)/);
+    assert.deepEqual(gh.calls.issueLabels, []);
+    assert.equal(await runCheck([URL, ...PR_ARGS, '--dry-run'], deps(repo, gh, out)), 0);
+    assert.deepEqual(gh.calls.issueLabels, [[3]]);
+    await assert.rejects(runCheck([URL, ...AGENT, '--issue', '3x'], deps(repo, gh, out)), /--issue must be an issue number/);
+  } finally {
+    repo.cleanup();
+  }
+});
+
+test('a test run that writes to the shared .git/config is caught before the gate calls git again', async () => {
+  const { repo, baseSha, ledger } = setup({ mode: 'enforce' });
+  try {
+    repo.git(['checkout', '--quiet', 'agent/fix']);
+    // Worktrees have a `.git` file pointing at <common>/worktrees/<name>.
+    const plant = [
+      "import * as plantFs from 'node:fs';",
+      "import * as plantPath from 'node:path';",
+      "const gitdir = plantFs.readFileSync('.git', 'utf8').replace('gitdir:', '').trim();",
+      "plantFs.appendFileSync(plantPath.resolve(gitdir, '..', '..', 'config'), '\\n[core]\\n\\tfsmonitor = ./evil\\n');",
+    ].join('\n');
+    repo.write({ 'tests/plant.test.mjs': `${plant}\n${testFile('mul by 3 again', ['assert.equal(mul(3, 3), 9);'])}` });
+    repo.git(['add', 'tests/plant.test.mjs']);
+    repo.git(['commit', '--quiet', '-m', 'test: plant']);
+    const headSha = repo.git(['rev-parse', 'HEAD']);
+    repo.git(['checkout', '--quiet', 'main']);
+    const gh = fakeGh(repo, { baseSha, headSha, checks: [{ name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' }] });
+    const out = [];
+    assert.equal(await runCheck([URL, ...PR_ARGS], deps(repo, gh, out)), 4, out.join('\n'));
+    assert.match(out[0], /test run changed the git config, hooks or ledger/);
+    assert.equal(gh.calls.merge.length, 0);
+    assert.equal(readLedger(ledger).outcomes.length, 20, 'nothing is logged');
   } finally {
     repo.cleanup();
   }
@@ -159,8 +227,9 @@ test('check --local runs end to end through the CLI', () => {
 });
 
 test('gh output is normalized and CI collapses to one state', () => {
-  const pr = normalizePr({ number: 3, author: { login: 'bot' }, labels: [{ name: 'x' }], commits: [{ messageHeadline: 'fix: a' }], closingIssuesReferences: [{ number: 9 }], mergeCommit: null });
-  assert.deepEqual([pr.author, pr.labels, pr.subjects, pr.linkedIssues], ['bot', ['x'], ['fix: a'], [9]]);
+  const pr = normalizePr({ number: 3, author: { login: 'bot' }, labels: [{ name: 'x' }], commits: [{ messageHeadline: 'fix: a' }], isCrossRepository: false, mergeCommit: null });
+  assert.deepEqual([pr.author, pr.labels, pr.subjects, pr.isFork], ['bot', ['x'], ['fix: a'], false]);
+  assert.equal(normalizePr({ number: 3 }).isFork, true, 'unknown origin counts as a fork');
   assert.equal(checksState([]), 'none');
   assert.equal(checksState([{ name: 'mergeproof', status: 'IN_PROGRESS' }]), 'none', 'the gate ignores its own job');
   assert.equal(checksState([{ name: 'ci', status: 'COMPLETED', conclusion: 'SUCCESS' }, { context: 'lint', state: 'SUCCESS' }]), 'green');

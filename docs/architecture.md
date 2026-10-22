@@ -11,9 +11,10 @@ config from base ─► classifyKind ─► detectTampering ─► proveChange �
                                                with a Mergeproof-Verdict trailer ◄─────┘
 ```
 
-- **Config comes from the base commit**, never the PR, so a PR can't loosen its own gate. A PR that edits `.mergeproof.json`, `.mergeproof/**` or `.github/**` is tampering.
+- **Config comes from the base branch tip**, never the PR and never the older merge-base it branched from, so a PR can't loosen its own gate or dodge a tightening made after it branched. The diff is still taken from the merge-base. A PR that edits `.mergeproof.json`, `.mergeproof/**` or `.github/**` is tampering.
 - **Tamper rules run before any test.** A tamper note ends the run with `HUMAN`, so the gate never executes code from a PR it already distrusts.
 - **Proof runs in throwaway worktrees**: one at base (with the PR's new test files copied in), one at head. They share the checkout's `node_modules`, which is safe because any manifest change makes the PR `deps`, and deps PRs are never tested. Credentials (`*TOKEN*`, `*SECRET*`, `*PASSWORD*`, `*API_KEY*`) are removed from the test environment.
+- **The shared `.git` is guarded.** Worktrees share the checkout's `.git` directory, so PR test code could plant a hook, an fsmonitor or a filter in its config. Every git call runs with `core.hooksPath` set to the null device and `core.fsmonitor=false`, and `.git/config`, `config.worktree`, `hooks/`, `info/` and the ledger are fingerprinted before and after the proof. Any change ends the run with `HUMAN`; the worktrees are then deleted without calling git, and nothing is logged. The ledger is read once, before any PR code runs.
 - **The merge is pinned** with `gh pr merge --match-head-commit`, so a push after the proof can't ride along.
 - `check --local` runs the same pipeline on `HEAD` against its merge base with `--base` (default: origin's default branch). It never merges, comments or writes the ledger. Agents use it as a preflight (M2).
 - `mergeproof sync` settles the ledger (below) and opens a human-triage issue for every newly reverted merge.
@@ -27,10 +28,10 @@ All I/O goes through `src/adapters/`: `process` for child processes, `git` for l
 | Any manifest or lockfile | `deps` |
 | Only docs | `docs` |
 | Source, no tests | `refactor` |
-| Source and tests | `feature`, or `bugfix` when the linked issue has a label from `issueLabels.bugfix` |
+| Source and tests | `feature`, or `bugfix` when the `--issue` has a label from `issueLabels.bugfix` |
 | Only tests, or nothing | none, so `HUMAN` |
 
-Feature and bugfix have the same proof, so the label only picks the trust bucket. It comes from the issue the PR closes, which a maintainer labels and the agent's PR can't change. Labels and commit prefixes written on the PR itself are only compared against the paths.
+Feature and bugfix have the same proof, so the label only picks the trust bucket. It comes from the issue the workflow dispatched the agent for, passed as `--issue <n>` and looked up in the PR's own repository. The PR's "closes #N" links are ignored: the agent writes those and could point at any labeled issue. Labels and commit prefixes written on the PR itself are only compared against the paths.
 
 ## Tamper rules
 
@@ -61,7 +62,7 @@ Then every kind except deps needs CI green. Without a CI result (local preflight
 | Kind not trusted for this agent and model | `HUMAN` |
 | Otherwise | `MERGE` |
 
-In `shadow` mode a `MERGE` verdict is reported but never executed. `off` turns the gate into a constant `HUMAN`, so nothing merges. A PR whose author isn't in `agents.logins` and whose branch doesn't start with one of `agents.branchPrefixes` is not an agent PR and goes to `HUMAN`.
+In `shadow` mode a `MERGE` verdict is reported but never executed. `off` turns the gate into a constant `HUMAN`, so nothing merges. An agent PR is one whose author is in `agents.logins` and, when `agents.branchPrefixes` is non-empty, whose branch starts with one of them. Anyone can name a branch `agent/...`, so the branch alone never makes a PR an agent PR. Every other PR, and every fork PR, goes to `HUMAN`.
 
 ## Config (`.mergeproof.json`)
 
@@ -116,4 +117,4 @@ Trust per (kind, agent, model) counts only `clean` and `reverted` outcomes: at l
 ## Decisions
 
 - **Config format (resolved).** v1 uses `.mergeproof.json`: zero dependencies and no parser bugs. YAML may come later.
-- **Feature vs bugfix (resolved for M1).** The linked issue's maintainer label picks the bucket (`issueLabels.bugfix`); without one, it's a feature. M2 must make sure the agent's token can't label issues.
+- **Feature vs bugfix (resolved for M1).** The maintainer label on the `--issue` the workflow passes picks the bucket (`issueLabels.bugfix`); without one, it's a feature. M2 must make sure the agent's token can't label issues.

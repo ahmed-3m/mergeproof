@@ -1,14 +1,22 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { runProcess } from './process.mjs';
 
 // Local git operations: changed files between base and head, throwaway
 // worktrees for proof runs, and history for `sync`. Every call is an argv
 // array with shell: false, so paths from a PR are never parsed by a shell.
 
+// Hooks and fsmonitor are switched off on every call, so nothing planted in the
+// repo's git config can run when the gate touches git.
+const SAFE_CONFIG = [
+  '-c', 'core.quotePath=false',
+  '-c', `core.hooksPath=${process.platform === 'win32' ? 'NUL' : '/dev/null'}`,
+  '-c', 'core.fsmonitor=false',
+];
+
 function git(cwd, args, { allowFail = false } = {}) {
-  const res = runProcess('git', ['-c', 'core.quotePath=false', ...args], { cwd });
+  const res = runProcess('git', [...SAFE_CONFIG, ...args], { cwd });
   if (res.code !== 0 && !allowFail) {
     throw new Error(`git ${args[0]} failed: ${(res.stderr || res.stdout).trim().split('\n')[0]}`);
   }
@@ -19,6 +27,11 @@ const out = (cwd, args) => git(cwd, args).stdout.trim();
 
 export function topLevel(cwd) {
   return out(cwd, ['rev-parse', '--show-toplevel']);
+}
+
+/** Absolute path of the .git directory shared by the checkout and its worktrees. */
+export function commonDir(repoRoot) {
+  return resolve(repoRoot, out(repoRoot, ['rev-parse', '--git-common-dir']));
 }
 
 export function revParse(repoRoot, ref) {

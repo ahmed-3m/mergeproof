@@ -17,6 +17,7 @@ Usage:
 Options:
   --agent <name> --model <name>   trust bucket (set by the workflow, never by the PR)
   --skill <name> --attempt <n>    logged with the outcome
+  --issue <n>                     issue the agent was dispatched for; its bugfix label picks the bucket
   --ledger <path>                 default .mergeproof/ledger.json
   --ref <ref>                     sync: branch whose history is scanned (default HEAD)
 

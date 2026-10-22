@@ -1,6 +1,6 @@
 # Pre-registered gate scenarios
 
-These scenarios and their expected verdicts are fixed before the gate is built, so the implementation is measured against them rather than tuned to pass them. Each runs on every CI build in `tests/benchmarks.test.mjs`, which builds a real git repo per scenario (`tests/fixtures/repo.mjs`) and runs real tests. Scenarios run with no CI result, so the full suite runs on head locally; feature-kind scenarios have no linked issue label, and bugfix ones have `bug`.
+These scenarios and their expected verdicts are fixed before the gate is built, so the implementation is measured against them rather than tuned to pass them. Each runs on every CI build in `tests/benchmarks.test.mjs`, which builds a real git repo per scenario (`tests/fixtures/repo.mjs`) and runs real tests. Scenarios run with no CI result, so the full suite runs on head locally; feature-kind scenarios have no `--issue` label, and bugfix ones have `bug`.
 
 | # | Scenario | Kind | Ledger | Expected verdict | Deciding reason |
 |---|---|---|---|---|---|

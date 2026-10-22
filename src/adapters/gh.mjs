@@ -6,7 +6,7 @@ import { runProcess } from './process.mjs';
 
 const PR_FIELDS = [
   'number', 'title', 'url', 'author', 'state', 'headRefName', 'headRefOid', 'baseRefName', 'baseRefOid',
-  'labels', 'commits', 'closingIssuesReferences', 'mergeCommit', 'mergedAt', 'statusCheckRollup',
+  'labels', 'commits', 'isCrossRepository', 'mergeCommit', 'mergedAt', 'statusCheckRollup',
 ].join(',');
 
 function gh(args) {
@@ -36,7 +36,7 @@ export function normalizePr(raw) {
     baseSha: raw.baseRefOid,
     labels: (raw.labels ?? []).map((l) => l.name),
     subjects: (raw.commits ?? []).map((c) => c.messageHeadline ?? ''),
-    linkedIssues: (raw.closingIssuesReferences ?? []).map((i) => i.number),
+    isFork: raw.isCrossRepository !== false, // unknown counts as a fork
     mergeCommit: raw.mergeCommit?.oid ?? null,
     mergedAt: raw.mergedAt ?? null,
     checks: raw.statusCheckRollup ?? [],
@@ -70,7 +70,10 @@ export function getChecksStatus(prUrl) {
   return checksState(JSON.parse(gh(['pr', 'view', prUrl, '--json', 'statusCheckRollup'])).statusCheckRollup ?? []);
 }
 
-/** Labels on the PR's linked issues. Maintainers set these; the agent's PR can't. */
+/**
+ * Labels on the issues the workflow dispatched the agent for (`--issue`), from the
+ * PR's own repository. Never the PR's "closes #N" links, which the agent writes.
+ */
 export function issueLabels(prUrl, issueNumbers) {
   const { repo } = parsePrUrl(prUrl) ?? {};
   if (!repo) return [];

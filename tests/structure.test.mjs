@@ -35,7 +35,7 @@ const CONTRACT = {
   'src/commands/check.mjs': ['runCheck', 'evaluate'],
   'src/commands/sync.mjs': ['runSync', 'settle'],
   'src/adapters/process.mjs': ['runProcess'],
-  'src/adapters/git.mjs': ['changedFiles', 'changedPaths', 'diff', 'addedLines', 'addWorktree', 'removeWorktree', 'log'],
+  'src/adapters/git.mjs': ['changedFiles', 'changedPaths', 'diff', 'addedLines', 'addWorktree', 'removeWorktree', 'commonDir', 'log'],
   'src/adapters/gh.mjs': ['getPullRequest', 'getChecksStatus', 'issueLabels', 'squashMerge', 'comment', 'createIssue'],
   'src/adapters/runner.mjs': ['runTests'],
 };

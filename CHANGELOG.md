@@ -11,9 +11,14 @@ All notable changes to this project are documented here. The format follows [Kee
 - Tamper rules: unsafe file names, gate-file edits, edited, renamed or deleted tests, skip/only markers, kind claims that disagree with the paths, oversized diffs.
 - `check` flags `--base`, `--agent`, `--model`, `--skill`, `--attempt`, `--ledger`; `sync` flags `--dry-run`, `--ledger`, `--ref`.
 - The 8 pre-registered benchmark scenarios run end to end in `tests/benchmarks.test.mjs`; seeded `demo/ledger.json`.
-
-### Security
-- Test runs drop credential-like environment variables and `NODE_TEST_CONTEXT` (an inherited value made a nested `node --test` exit 0 on failure).
+- `check --issue <n>`: the issue the workflow dispatched the agent for.
 - Project scaffold: CLI entry with `check` and `sync` commands, verdict contract (`MERGE | RETRY | HUMAN`) and exit codes, config defaults, stubbed pipeline modules (classify, tamper, prove, decide, ledger, trailer) and adapters (process, git, gh, runner).
 - Specs: `PROTOTYPE.md` (M1 core CLI) and `briefs/m2-autopilot.md` (M2 package).
 - Tests for the CLI, verdict formatting, flag parsing and repo invariants; CI on Node 18/22/24 for Linux and Windows.
+
+### Security
+- Test runs drop credential-like environment variables and `NODE_TEST_CONTEXT` (an inherited value made a nested `node --test` exit 0 on failure).
+- An agent PR now needs an author in `agents.logins`; a branch named `agent/...` alone no longer qualifies, and fork PRs always go to a human.
+- The gate config is read from the base branch tip instead of the merge-base, so a PR can't dodge a config change made after it branched.
+- Git runs with hooks and fsmonitor off, and `.git/config`, hooks, `info/` and the ledger are fingerprinted around the proof runs; a change made by PR test code is `HUMAN` and nothing is logged. The ledger is read once, before PR code runs.
+- The feature/bugfix bucket comes from `--issue` only; the PR's own "closes #N" links are no longer read.

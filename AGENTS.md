@@ -6,8 +6,8 @@
 
 1. **Zero dependencies.** Pure Node.js (>= 18.17) built-ins only, including for tests (`node:test`). If a change needs a package, the change is wrong.
 2. **The gate never calls an LLM.** Decisions are plain, deterministic code so the agent being judged cannot influence them.
-3. **Kind comes from changed paths only.** Agent-written labels and commit prefixes are only compared against the paths; a mismatch is tampering. The one exception is the maintainer's label on the linked issue, which only splits feature from bugfix (same proof, different trust bucket).
-8. **The PR never configures its own gate.** Config is read from the base commit; agent and model come from the caller's flags, not the PR.
+3. **Kind comes from changed paths only.** Agent-written labels and commit prefixes are only compared against the paths; a mismatch is tampering. The one exception is the maintainer's label on the issue the workflow passes as `--issue` (never the PR's own "closes #N"), which only splits feature from bugfix (same proof, different trust bucket).
+8. **The PR never configures its own gate.** Config is read from the base branch tip; agent, model and issue come from the caller's flags, not the PR. Agent PRs are identified by author login (`agents.logins`), never by branch name alone, and fork PRs always go to a human.
 4. **Verdict contract is frozen.** `MERGE | RETRY | HUMAN` and the exit codes in `src/verdict.mjs` are what workflows branch on.
 5. **Token discipline.** One-line verdict, at most 3 notes, failures first.
 6. **Spawn safety.** All child processes go through `src/adapters/process.mjs` (`runProcess`) with argv arrays. Windows `.cmd`/`.bat` shims (npm, npx) need `shell: true` (CVE-2024-27980) and must only receive trusted arguments.

@@ -1,4 +1,5 @@
-import { existsSync, symlinkSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { parseFlags } from '../args.mjs';
 import { UsageError } from '../errors.mjs';
@@ -25,12 +26,35 @@ function linkNodeModules(root, dir) {
   if (existsSync(src) && !existsSync(join(dir, 'node_modules'))) symlinkSync(src, join(dir, 'node_modules'), 'junction');
 }
 
+// PR test code runs in worktrees that share the checkout's .git directory. It
+// could plant a hook, an fsmonitor or a filter driver in the shared git config,
+// or rewrite the ledger, and the gate's next git call or write would act on it.
+// These paths are fingerprinted before and after the proof runs; any change
+// is tampering, and git is not called again.
+function guardedPaths(commonDir, ledgerPath) {
+  const paths = ['config', 'config.worktree', 'hooks', 'info'].map((p) => join(commonDir, p));
+  return ledgerPath ? [...paths, ledgerPath] : paths;
+}
+
+function fingerprint(paths) {
+  const h = createHash('sha256');
+  const add = (p) => {
+    h.update(`\0${p}\0`);
+    if (!existsSync(p)) return void h.update('-');
+    const st = statSync(p);
+    if (!st.isDirectory()) return void h.update(readFileSync(p));
+    for (const name of readdirSync(p).sort()) add(join(p, name));
+  };
+  paths.forEach(add);
+  return h.digest('hex');
+}
+
 /**
  * The gate itself, PROTOTYPE.md flows 1-3:
  *   classifyKind → detectTampering → proveChange → decide.
- * Reads nothing from the PR's own config: `config` comes from the base commit.
+ * Reads nothing from the PR's own config: `config` comes from the base branch.
  */
-export function evaluate({ root, baseSha, headSha, config, claims, ci, issueLabels = [], agent, model, ledger }, deps = defaultDeps) {
+export function evaluate({ root, baseSha, headSha, config, claims, ci, issueLabels = [], agent, model, ledger, ledgerPath = null }, deps = defaultDeps) {
   const files = deps.git.changedFiles(root, baseSha, headSha);
   const kind = classifyKind(files.map((f) => f.path), config, { issueLabels });
   const testFiles = files
@@ -58,25 +82,44 @@ export function evaluate({ root, baseSha, headSha, config, claims, ci, issueLabe
       only,
       timeoutSec: config.limits.testTimeoutSec,
     });
+  const guarded = guardedPaths(deps.git.commonDir(root), ledgerPath);
+  const before = fingerprint(guarded);
   let proof;
+  let tampered = false;
   try {
     proof = proveChange(kind, { files, config, ci, runBase: runner('base'), runHead: runner('head') });
   } finally {
-    for (const dir of Object.values(trees)) deps.git.removeWorktree(root, dir);
+    tampered = fingerprint(guarded) !== before;
+    for (const dir of Object.values(trees)) {
+      if (tampered) rmSync(dir, { recursive: true, force: true });
+      else deps.git.removeWorktree(root, dir);
+    }
+  }
+  if (tampered) {
+    const note = { ok: false, rule: 'testRunTamperedRepo', text: 'test run changed the git config, hooks or ledger' };
+    return { kind, files, tamperNotes: [note], proof: null, tampered, verdict: decide({ kind, tamperNotes: [note] }) };
   }
   const trust = kind ? trustFor(ledger, { kind, agent, model }, config.trust) : null;
   return { kind, files, tamperNotes, proof, trust, verdict: decide({ kind, tamperNotes, proof, trust }) };
 }
 
-function isAgentPr(pr, config) {
-  return config.agents.logins.includes(pr.author) || config.agents.branchPrefixes.some((p) => pr.headRef?.startsWith(p));
+// Identity is the author login; anyone can name a branch `agent/...`, and a fork
+// can claim any branch name. The branch prefix only narrows a trusted login.
+function notAnAgentPr(pr, config) {
+  if (pr.isFork) return 'PR comes from a fork';
+  if (!config.agents.logins.includes(pr.author)) return `not an agent PR (author ${pr.author} is not in agents.logins)`;
+  const prefixes = config.agents.branchPrefixes;
+  if (prefixes.length > 0 && !prefixes.some((p) => pr.headRef?.startsWith(p))) {
+    return `agent branch ${pr.headRef} does not start with ${prefixes.join(' or ')}`;
+  }
+  return null;
 }
 
 // PROTOTYPE.md flows 1-3, in order:
 //   loadConfig → classifyKind → detectTampering → proveChange → decide
 //   → (enforce mode) merge with trailer → appendOutcome to the ledger
 export async function runCheck(argv, deps = defaultDeps) {
-  const { positionals, flags } = parseFlags(argv, ['local', 'dry-run', 'json'], ['base', 'agent', 'model', 'skill', 'attempt', 'ledger']);
+  const { positionals, flags } = parseFlags(argv, ['local', 'dry-run', 'json'], ['base', 'agent', 'model', 'skill', 'attempt', 'issue', 'ledger']);
   if (flags.local && positionals.length > 0) {
     throw new UsageError('use either <pr-url> or --local, not both');
   }
@@ -85,6 +128,8 @@ export async function runCheck(argv, deps = defaultDeps) {
   }
   const attempts = flags.attempt === null ? 1 : Number(flags.attempt);
   if (!Number.isInteger(attempts) || attempts < 1) throw new UsageError('--attempt must be a positive integer');
+  const issue = flags.issue === null ? null : Number(flags.issue);
+  if (issue !== null && (!Number.isInteger(issue) || issue < 1)) throw new UsageError('--issue must be an issue number');
   const prUrl = flags.local ? null : positionals[0];
   if (prUrl && !gh.parsePrUrl(prUrl)) throw new UsageError(`not a pull request URL: ${prUrl}`);
 
@@ -97,29 +142,36 @@ export async function runCheck(argv, deps = defaultDeps) {
     deps.git.fetch(root, [`+refs/heads/${pr.baseRef}:refs/mergeproof/base`, `+refs/pull/${pr.number}/head:refs/mergeproof/head`]);
     input = {
       baseSha: deps.git.mergeBase(root, pr.baseSha, pr.headSha),
+      configSha: pr.baseSha,
       headSha: pr.headSha,
       claims: { title: pr.title, labels: pr.labels, subjects: pr.subjects },
       ci: gh.checksState(pr.checks),
-      issueLabels: pr.linkedIssues.length ? deps.gh.issueLabels(prUrl, pr.linkedIssues) : [],
+      // Only the issue the workflow dispatched the agent for; "closes #N" in the PR is agent-written.
+      issueLabels: issue ? deps.gh.issueLabels(prUrl, [issue]) : [],
       agent: flags.agent ?? pr.author,
     };
   } else {
     const headSha = deps.git.revParse(root, 'HEAD');
-    const base = flags.base ?? deps.git.defaultBranch(root);
-    const baseSha = deps.git.mergeBase(root, deps.git.revParse(root, base), headSha);
-    input = { baseSha, headSha, claims: { subjects: deps.git.commitSubjects(root, baseSha, headSha) }, ci: null, issueLabels: [] };
+    const configSha = deps.git.revParse(root, flags.base ?? deps.git.defaultBranch(root));
+    const baseSha = deps.git.mergeBase(root, configSha, headSha);
+    input = { baseSha, configSha, headSha, claims: { subjects: deps.git.commitSubjects(root, baseSha, headSha) }, ci: null, issueLabels: [] };
     input.agent = flags.agent ?? process.env.MERGEPROOF_AGENT ?? 'local';
   }
   input.model = flags.model ?? process.env.MERGEPROOF_MODEL ?? 'unknown';
-  const config = parseConfig(deps.git.showFile(root, input.baseSha, CONFIG_FILE), `${CONFIG_FILE} (base ${input.baseSha.slice(0, 7)})`);
+  // The gate config is today's base branch tip, never the PR and never an old
+  // merge-base the PR happened to branch from.
+  const config = parseConfig(deps.git.showFile(root, input.configSha, CONFIG_FILE), `${CONFIG_FILE} (base ${input.configSha.slice(0, 7)})`);
 
+  // Read once, before any PR code runs; the outcome is appended to this copy.
+  const ledger = readLedger(ledgerPath);
+  const notAgent = pr ? notAnAgentPr(pr, config) : null;
   let result;
   if (config.mode === 'off') {
     result = { verdict: makeVerdict('HUMAN', { notes: [{ ok: false, text: 'mergeproof is off for this repo' }] }) };
-  } else if (pr && !isAgentPr(pr, config)) {
-    result = { verdict: makeVerdict('HUMAN', { notes: [{ ok: false, text: `not an agent PR (author ${pr.author}, branch ${pr.headRef})` }] }) };
+  } else if (notAgent) {
+    result = { verdict: makeVerdict('HUMAN', { notes: [{ ok: false, text: notAgent }] }) };
   } else {
-    result = evaluate({ root, ...input, config, ledger: readLedger(ledgerPath) }, deps);
+    result = evaluate({ root, ...input, config, ledger, ledgerPath }, deps);
   }
   const { verdict } = result;
 
@@ -132,8 +184,7 @@ export async function runCheck(argv, deps = defaultDeps) {
       skill: flags.skill ?? null, attempts, verdict: verdict.verdict,
       provenAt: deps.now().toISOString(), mergedAt: null, mergeCommit: null, status: 'open',
     };
-    const before = readLedger(ledgerPath);
-    appendOutcome(before, outcome); // fail before merging if the outcome can't be logged
+    appendOutcome(ledger, outcome); // fail before merging if the outcome can't be logged
     if (verdict.verdict === 'MERGE' && config.mode === 'enforce') {
       const trailer = formatTrailer({ pr: pr.number, kind: result.kind, agent: input.agent, model: input.model, skill: flags.skill, attempts });
       deps.gh.squashMerge(prUrl, { body: trailer, headSha: pr.headSha });
@@ -141,7 +192,7 @@ export async function runCheck(argv, deps = defaultDeps) {
       Object.assign(outcome, { status: 'pending', mergedAt: after.mergedAt ?? deps.now().toISOString(), mergeCommit: after.mergeCommit });
       merged = true;
     }
-    writeLedger(ledgerPath, appendOutcome(before, outcome));
+    writeLedger(ledgerPath, appendOutcome(ledger, outcome));
   }
 
   const mode = config.mode === 'enforce' && !flags['dry-run'] && !flags.local ? 'enforce' : flags.local ? 'local' : flags['dry-run'] ? 'dry-run' : config.mode;
