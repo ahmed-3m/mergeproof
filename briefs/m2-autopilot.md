@@ -31,7 +31,7 @@ distilled: One-command install that wires mergeproof into GitHub Actions so trus
 - RISK: PR code runs in CI, including inside `mergeproof check`'s proof runs, so the gate job checks out with `persist-credentials: false`, gets no secrets and a read-only token, only a separate merge job can write, the workflow passes the dispatching issue as `--issue`, and `SECURITY.md` documents every permission
 - ASSUMPTION: shadow mode is the default until the customer sets `mode: enforce`, and the `MERGEPROOF_MODE` repo variable is a kill switch every workflow checks first
 - ASSUMPTION: bring your own key, with harness and model as separate settings (Claude Code action by default, GLM through Z.ai's Anthropic-compatible endpoint)
-- ASSUMPTION: agent PRs are identified by bot login or branch prefix, and human PRs are never gated
+- ASSUMPTION: agent PRs are identified by bot login (narrowed by branch prefix), fork PRs always go to a human, and human PRs are never gated
 
 ## Notes
 - Skills ship as `SKILL.md` playbooks; harnesses without native skills read the same files as prompt instructions
