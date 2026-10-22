@@ -174,27 +174,24 @@ export async function runCheck(argv, deps = defaultDeps) {
   // own CI starts a fresh one. The verdict file still gets written — naming
   // the CI'd commit, proven false — so apply's moved-head refusal supersedes
   // this run with nothing written: no label, no comment, no merge.
+  const writeHandoff = (fields) =>
+    writeVerdictFile(resolve(deps.cwd(), flags['verdict-out']), {
+      schema: VERDICT_FILE_SCHEMA,
+      url: pr.url,
+      pr: pr.number,
+      agent: input.agent,
+      model: input.model,
+      skill: flags.skill ?? null,
+      attempts,
+      issue,
+      ...fields,
+    });
   if (pr && flags.head !== null && pr.headSha !== flags.head) {
     // No kind: the CI'd commit may be gone after a force-push, and apply
     // refuses a moved head before it reads anything else from the file.
-    const kind = null;
-    const verdict = makeVerdict('HUMAN', { kind, notes: [{ ok: false, text: 'PR changed after its CI completed; the new head gets its own gate run' }] });
+    const verdict = makeVerdict('HUMAN', { kind: null, notes: [{ ok: false, text: 'PR changed after its CI completed; the new head gets its own gate run' }] });
     if (flags['verdict-out'] !== null) {
-      writeVerdictFile(resolve(deps.cwd(), flags['verdict-out']), {
-        schema: VERDICT_FILE_SCHEMA,
-        url: pr.url,
-        pr: pr.number,
-        headSha: flags.head,
-        kind: kind ?? null,
-        verdict: verdict.verdict,
-        notes: verdict.notes,
-        proven: false,
-        agent: input.agent,
-        model: input.model,
-        skill: flags.skill ?? null,
-        attempts,
-        issue,
-      });
+      writeHandoff({ headSha: flags.head, kind: null, verdict: verdict.verdict, notes: verdict.notes, proven: false });
     }
     deps.print(
       flags.json
@@ -245,20 +242,12 @@ export async function runCheck(argv, deps = defaultDeps) {
     ));
   }
   if (flags['verdict-out'] !== null) {
-    writeVerdictFile(resolve(deps.cwd(), flags['verdict-out']), {
-      schema: VERDICT_FILE_SCHEMA,
-      url: pr.url,
-      pr: pr.number,
+    writeHandoff({
       headSha: input.headSha,
       kind: result.kind ?? null,
       verdict: verdict.verdict,
       notes: verdict.notes,
       proven: result.proof?.ok === true && !(result.tamperNotes?.length > 0),
-      agent: input.agent,
-      model: input.model,
-      skill: flags.skill ?? null,
-      attempts,
-      issue,
     });
   }
   deps.print(flags.json ? JSON.stringify({ ...verdict, mode, merged }, null, 2) : text);

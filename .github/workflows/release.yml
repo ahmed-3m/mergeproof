@@ -62,4 +62,9 @@ jobs:
             const m = s.match(new RegExp("^## \\[" + v + "\\].*$\\n([\\s\\S]*?)(?=^## \\[|$)", "m"));
             process.stdout.write(m ? m[1].trim() : "");
           ' "$TAG")"
-          gh release create "$TAG" --title "$TAG" --notes "$notes" || echo "release for $TAG already exists"
+          # Create only when missing; a real create failure (auth, API) must
+          # fail the job — after this point the v1 tag has already moved, so
+          # a silent skip would hide a broken release.
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "$TAG" --notes "$notes"
+          fi

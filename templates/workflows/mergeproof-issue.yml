@@ -125,6 +125,10 @@ jobs:
           # (github-actions[bot] authored); it must fix only what the notes name.
           retry_note=""
           if [ -n "$PR_NUMBER" ]; then
+            # `|| true` is deliberate here, unlike mergeproof-pr's comment
+            # fetch (which fails closed): this URL only decorates the retry
+            # prompt — the note names the verdict comment without it — so a
+            # transient API failure must not stop the agent's run.
             verdict_url="$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" \
               --jq '[.[] | select(.user.login == "github-actions[bot]") | select(.body | contains("Mergeproof —"))][-1].html_url // empty' || true)"
             retry_note="This is gate retry attempt $ATTEMPT for pull request #$PR_NUMBER. Fix ONLY what the gate's latest notes name — read the latest Mergeproof verdict comment by github-actions[bot]${verdict_url:+ at $verdict_url} — keep the existing commits and add one new commit with the right prefix. Do not reshuffle the rest of the diff."
