@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync } from 'node:fs';
+import { copyFileSync, mkdirSync, rmSync } from 'node:fs';
 import { createRepo, testFile, FIXED_MATH, BASE_FILES } from './fixtures/repo.mjs';
 import { runCheck, evaluate, defaultDeps as checkDeps } from '../src/commands/check.mjs';
 import { runSync, settle, defaultDeps as syncDeps } from '../src/commands/sync.mjs';
@@ -356,6 +356,28 @@ test('sync writes the settled ledger and opens a human-triage issue', async () =
     assert.equal(issues[0].repo, 'acme/app');
     assert.match(issues[0].body, /not meant for an agent/);
     assert.match(out[0], /1 newly reverted/);
+  } finally {
+    repo.cleanup();
+  }
+});
+
+test('renaming a manifest away is still a dependency change', async () => {
+  // package-lock.json → old/package-lock.json must not escape the deps bucket
+  // by classifying only its destination path.
+  const { repo, baseSha, ledger } = setup({ mode: 'enforce' });
+  try {
+    repo.git(['checkout', '--quiet', 'agent/fix']);
+    rmSync(ledger); // the fixture's commit() adds -A; keep the ledger out of the branch
+    repo.git(['mv', 'package.json', 'old-package.json']);
+    const headSha = repo.commit('chore: move the manifest');
+    repo.git(['checkout', '--quiet', 'main']);
+    copyFileSync(DEMO, ledger);
+    const gh = fakeGh(repo, { baseSha, headSha, headRef: 'agent/fix' });
+    const out = [];
+    assert.equal(await runCheck([URL, ...PR_ARGS], deps(repo, gh, out)), 4, out.join('\n'));
+    assert.match(out[0], /HUMAN \(kind: deps\)/, 'the rename classifies as deps, never refactor');
+    assert.equal(gh.calls.merge.length, 0);
+    assert.equal(readLedger(ledger).outcomes.length, 20, 'deps PRs are never logged as proven');
   } finally {
     repo.cleanup();
   }

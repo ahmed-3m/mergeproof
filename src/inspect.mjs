@@ -16,7 +16,11 @@ export const defaultDeps = { git };
  */
 export function inspect({ root, baseSha, headSha, config, claims, issueLabels = [] }, deps = defaultDeps) {
   const files = deps.git.changedFiles(root, baseSha, headSha);
-  const kind = classifyKind(files.map((f) => f.path), config, { issueLabels });
+  // Classification sees the old path of a rename too: renaming a manifest
+  // away (package-lock.json → backups/…) is still touching a manifest, so it
+  // stays `deps` — which never auto-merges — instead of escaping to refactor.
+  const touchedPaths = files.flatMap((f) => (f.oldPath ? [f.path, f.oldPath] : [f.path]));
+  const kind = classifyKind(touchedPaths, config, { issueLabels });
   const testFiles = files
     .filter((f) => f.status !== 'D' && matchesAny(f.path, config.paths.tests) && SAFE_PATH.test(f.path))
     .map((f) => f.path);
