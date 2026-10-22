@@ -2,7 +2,7 @@
 // module contract every pipeline stage must keep while it is being built.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { VERSION } from '../src/version.mjs';
 
@@ -21,6 +21,24 @@ test('zero dependencies, including dev dependencies', () => {
 test('every published path exists', () => {
   for (const p of PKG.files) assert.ok(existsSync(resolve(p)), `missing ${p}`);
   assert.ok(existsSync(resolve(PKG.bin.mergeproof)));
+});
+
+test('every skills/*/SKILL.md has name, integer version and description frontmatter', () => {
+  const skills = readdirSync(resolve('skills'), { withFileTypes: true }).filter((e) => e.isDirectory());
+  assert.ok(skills.length > 0, 'skills/ must ship at least one skill');
+  for (const dir of skills) {
+    const file = resolve('skills', dir.name, 'SKILL.md');
+    const text = readFileSync(file, 'utf8');
+    const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
+    assert.ok(fm, `${dir.name}/SKILL.md must start with YAML frontmatter`);
+    const field = (key) => {
+      const line = fm[1].split(/\r?\n/).find((l) => l.startsWith(`${key}:`));
+      return line == null ? null : line.slice(key.length + 1).trim();
+    };
+    assert.ok(field('name'), `${dir.name}/SKILL.md frontmatter needs a name`);
+    assert.match(field('version') ?? '', /^\d+$/, `${dir.name}/SKILL.md frontmatter needs an integer version`);
+    assert.ok(field('description'), `${dir.name}/SKILL.md frontmatter needs a description`);
+  }
 });
 
 const CONTRACT = {
