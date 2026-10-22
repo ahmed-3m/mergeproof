@@ -62,9 +62,10 @@ runs:
       run: |
         set -euo pipefail
         # Split args into words with globbing off: no variable, glob or
-        # command expansion happens on them.
+        # command expansion happens on them. -d '' reads the whole variable,
+        # not just its first line, and read returns 1 at the EOF it then hits.
         set -f
-        read -ra argv <<< "$MERGEPROOF_ARGS"
+        read -ra -d '' argv <<< "$MERGEPROOF_ARGS" || true
         set +f
         code=0
         node "$GITHUB_ACTION_PATH/bin/mergeproof.mjs" "$MERGEPROOF_COMMAND" "${argv[@]}" || code=$?

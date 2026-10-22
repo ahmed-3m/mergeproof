@@ -10,6 +10,16 @@ The three templates `mergeproof init` copies into a customer's
 | `mergeproof-issue.yml` | issue → PR | An issue opened by an allowlisted author or labeled `agent` by a write-capable collaborator starts the coding agent with the skill for the issue's kind, then posts the dispatch-marker comment (`github-actions[bot]` authored) that the PR workflow reads back. |
 | `mergeproof-sync.yml` | nightly | `sync` settles the ledger and opens a human-triage issue for each newly reverted merge. |
 
+
+> **Concurrency:** the apply job and the nightly sync share the
+> `mergeproof-ledger` concurrency group (`cancel-in-progress: false`), so
+> ledger writes never overlap and a text rebase never has to merge two
+> concurrent appends. GitHub keeps at most one pending run per group: when a
+> third run arrives while one is running and one is queued, the queued one is
+> dropped — that PR simply gets no verdict from this cycle. Re-run it with
+> `gh workflow run mergeproof-pr.yml -f pr=<number>` (or the workflow's
+> *Run workflow* dialog); nothing is lost, the dropped run wrote nothing.
+
 `mergeproof init` fills in the placeholders and creates the `agent` and
 `needs-human` labels and the `mergeproof-ledger` branch. Every job of every
 workflow checks the `MERGEPROOF_MODE != 'off'` kill switch first; shadow vs
@@ -40,7 +50,7 @@ enforce lives in `.mergeproof.json`, not in this variable.
 | Secret | Who sets it | Meaning |
 |---|---|---|
 | `MERGEPROOF_MODEL_KEY` | `mergeproof init` | API key for the model provider (passed as the agent action's `anthropic_api_key`). |
-| `MERGEPROOF_BOT_TOKEN` | `mergeproof init` | PAT of the bot user with `contents` write. The agent pushes and opens PRs with it (so they trigger CI), and the apply job merges with it (so the merge commit triggers the repo's push CI). |
+| `MERGEPROOF_BOT_TOKEN` | `mergeproof init` | PAT of the bot user with `contents` write. The agent pushes and opens PRs with it, so they trigger CI. The apply job never sees it: it lands with the job's `github.token`, whose comments are `github-actions[bot]`-authored (the attempt count and the agent's retry prompt read only those) and whose merges branch protection already allows — the accepted trade-off is that a mergeproof merge does not itself trigger the repo's push workflows (the gate pinned the merged head's CI instead). |
 
 The gate job sees no secret at all; see [SECURITY.md](../SECURITY.md) for the
 full per-job permission table.

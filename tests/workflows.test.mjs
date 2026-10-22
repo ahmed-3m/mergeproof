@@ -154,8 +154,12 @@ test('pr workflow: the context job trusts only github-actions[bot] comments', ()
   const ctx = PR_JOBS.context;
   assert.ok(ctx, 'pr workflow needs a context job');
   assert.match(ctx, /select\(\.user\.login == "github-actions\[bot\]"\)/);
-  assert.match(ctx, /<!-- mergeproof-dispatch/);
-  assert.match(ctx, /Mergeproof — RETRY/, 'the attempt count comes from bot-authored RETRY comments');
+  assert.match(ctx, /@json/, 'each body is one JSON string: newlines and \r cannot smuggle line-anchored markers');
+  assert.ok(
+    ctx.includes("grep -oE '<!-- mergeproof-dispatch issue=[0-9]+ skill=[A-Za-z0-9_@+./-]+ -->'"),
+    'the dispatch marker must match the strict pattern',
+  );
+  assert.match(ctx, /grep -c 'Mergeproof — RETRY'/, 'the attempt count comes from bot-authored RETRY comments, once per comment');
   assert.match(ctx, /GH_TOKEN: \$\{\{ github\.token \}\}/);
 });
 
@@ -180,7 +184,8 @@ test('pr workflow: the apply job lands the verdict and never installs anything',
   assert.match(apply, /--pr \$\{\{ needs\.context\.outputs\.pr-url \}\}/, 'the PR comes from the event, not from the artifact');
   assert.match(apply, /--head \$\{\{ needs\.context\.outputs\.head-sha \}\}/, 'apply pins the same head the gate gated');
   assert.doesNotMatch(apply, /\{\{INSTALL_COMMAND\}\}/, 'the apply job must never run an install command');
-  assert.match(apply, /GH_TOKEN: \$\{\{ secrets\.MERGEPROOF_BOT_TOKEN \}\}/, 'the merge uses the bot token so it triggers the push CI');
+  assert.match(apply, /GH_TOKEN: \$\{\{ github\.token \}\}/, 'apply lands with github.token, so its comments are github-actions[bot] authored');
+  assert.doesNotMatch(apply, /secrets\.MERGEPROOF_BOT_TOKEN/, "the agent's token never merges");
   assert.match(apply, /group: mergeproof-ledger/);
   assert.match(apply, /cancel-in-progress: false/);
   assert.match(apply, /gh workflow run mergeproof-issue\.yml/, 'RETRY re-dispatches the agent');

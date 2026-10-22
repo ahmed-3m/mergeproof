@@ -33,13 +33,13 @@ mergeproof decides whether code written by an AI agent may be merged, so it trea
 
 ## Workflow permissions
 
-Every job of every template (`templates/workflows/`), what it may do, which secrets it sees, and whether it runs PR code. Top-level permissions are `mergeproof-pr.yml`'s `permissions: {}`; each job declares only what it needs, and every job checks the `MERGEPROOF_MODE != 'off'` kill switch first.
+Every job of every template (`templates/workflows/`), what it may do, which secrets it sees, and whether it runs PR code. `mergeproof-pr.yml` grants nothing at the top level (`permissions: {}`) and each of its jobs declares only what it needs; `mergeproof-issue.yml` and `mergeproof-sync.yml` declare their scopes at the workflow level (their single job holds them all). Every job checks the `MERGEPROOF_MODE != 'off'` kill switch first. The apply job's checkout deliberately KEEPS its credentials: it never runs PR code, and its ledger push needs `github.token` — only the gate job (which does run PR code) and the issue workflow's agent checkout use `persist-credentials: false`.
 
 | Workflow | Job | Permissions | Secrets it sees | Runs PR code |
 |---|---|---|---|---|
 | `mergeproof-pr.yml` | `context` | `pull-requests: read`, `issues: read` | none | no |
 | `mergeproof-pr.yml` | `gate` | `contents: read`, `pull-requests: read`, `checks: read`, `issues: read`; `persist-credentials: false` | none | **yes** — the proof worktrees execute the PR's tests; read-only `github.token`, no write permission, no secrets |
-| `mergeproof-pr.yml` | `apply` | `contents: write`, `pull-requests: write`, `issues: write`, `checks: read`, `actions: write` | `MERGEPROOF_BOT_TOKEN` (as `GH_TOKEN`, so the merge commit triggers the push CI; the ledger push uses `github.token`) | no — never installs, never checks out the PR |
+| `mergeproof-pr.yml` | `apply` | `contents: write`, `pull-requests: write`, `issues: write`, `checks: read`, `actions: write` | none (`github.token` only — its comments are `github-actions[bot]`-authored so the attempt count works, and the agent's bot token never merges; merged commits do not trigger push workflows, the gate pinned the merged head's CI instead) | no — never installs, never checks out the PR |
 | `mergeproof-issue.yml` | `agent` | `contents: read`, `issues: write`, `pull-requests: write`, `actions: read`; `persist-credentials: false` | `MERGEPROOF_MODEL_KEY`, `MERGEPROOF_BOT_TOKEN` (both only inside the agent step) | no — runs the agent on the default branch; PR code belongs to the agent, not an untrusted author |
 | `mergeproof-sync.yml` | `sync` | `contents: write`, `issues: write`, `pull-requests: read` | none (`github.token` only) | no |
 

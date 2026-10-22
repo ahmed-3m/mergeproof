@@ -59,7 +59,7 @@ jobs:
           REPO: ${{ github.repository }}
           EVENT_NAME: ${{ github.event_name }}
           EVENT_PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
-          EVENT_PR_HEAD_SHA: ${{ github.event.workflow_run.pull_requests[0].head.sha }}
+          EVENT_PR_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           DISPATCH_PR: ${{ github.event.inputs.pr }}
           AGENT: ${{ vars.MERGEPROOF_AGENT }}
           MODEL: ${{ vars.MERGEPROOF_MODEL }}
@@ -78,13 +78,17 @@ jobs:
           # Everything re-derived below comes from comments authored by
           # github-actions[bot] only: the agent never gets to write its own
           # dispatch marker or attempt count, and comments from every other
-          # author are ignored.
+          # author are ignored. Each body is emitted as one JSON string
+          # (@json escapes newlines and carriage returns), so a marker must
+          # match the strict pattern anywhere in a single comment — echoed
+          # text that merely starts a line with the marker prefix does not
+          # count — and a RETRY counts once per comment, never per line.
           bodies="$(gh api --paginate "repos/$REPO/issues/$number/comments" \
-            --jq '.[] | select(.user.login == "github-actions[bot]") | .body' || true)"
+            --jq '.[] | select(.user.login == "github-actions[bot]") | @json' || true)"
 
           # The dispatch marker the issue workflow posted:
           #   <!-- mergeproof-dispatch issue=<n> skill=<name@version> -->
-          marker="$(grep '^<!-- mergeproof-dispatch' <<< "$bodies" | tail -n 1 || true)"
+          marker="$(grep -oE '<!-- mergeproof-dispatch issue=[0-9]+ skill=[A-Za-z0-9_@+./-]+ -->' <<< "$bodies" | tail -n 1 || true)"
           issue=""
           skill=""
           if [ -n "$marker" ]; then
@@ -92,7 +96,7 @@ jobs:
             skill="$(sed -n 's/.*skill=\([^ ]*\).*/\1/p' <<< "$marker" | tail -n 1)"
           fi
 
-          # attempt = 1 + the gate's prior RETRY verdict comments.
+          # attempt = 1 + the gate's prior RETRY verdict comments (one per comment).
           retries="$(grep -c 'Mergeproof — RETRY' <<< "$bodies" || true)"
           attempt=$(( retries + 1 ))
 
@@ -234,9 +238,13 @@ jobs:
         continue-on-error: true
         uses: ahmed-3m/mergeproof@v1
         env:
-          # The bot token merges, so the merge commit triggers the repo's push
-          # CI (events from the default GITHUB_TOKEN never do).
-          GH_TOKEN: ${{ secrets.MERGEPROOF_BOT_TOKEN }}
+          # github.token, never the agent's bot token: verdict comments must be
+          # authored by github-actions[bot] (the attempt count and the agent's
+          # retry prompt read only those), and branch protection lets only
+          # maintainers and the GitHub Actions app merge into the default
+          # branch, so the agent's own token can never merge. Trade-off: a merge
+          # made with github.token does not trigger push workflows on main.
+          GH_TOKEN: ${{ github.token }}
         with:
           command: apply
           args: >-
