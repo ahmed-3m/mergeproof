@@ -4,14 +4,14 @@ import { join, resolve } from 'node:path';
 import { parseFlags } from '../args.mjs';
 import { UsageError } from '../errors.mjs';
 import { CONFIG_FILE, parseConfig } from '../config.mjs';
-import { classifyKind } from '../classify.mjs';
-import { detectTampering, SAFE_PATH } from '../tamper.mjs';
 import { proveChange } from '../prove.mjs';
 import { decide } from '../decide.mjs';
-import { DEFAULT_LEDGER, appendOutcome, readLedger, trustFor, writeLedger } from '../ledger.mjs';
-import { formatTrailer } from '../trailer.mjs';
+import { DEFAULT_LEDGER, readLedger, trustFor } from '../ledger.mjs';
 import { EXIT_CODES, formatVerdict, makeVerdict } from '../verdict.mjs';
-import { matchesAny } from '../glob.mjs';
+import { notAnAgentPr } from '../agents.mjs';
+import { inspect } from '../inspect.mjs';
+import { VERDICT_FILE_SCHEMA, writeVerdictFile } from '../verdictfile.mjs';
+import { land } from '../land.mjs';
 import * as git from '../adapters/git.mjs';
 import * as gh from '../adapters/gh.mjs';
 import { runTests } from '../adapters/runner.mjs';
@@ -55,13 +55,7 @@ function fingerprint(paths) {
  * Reads nothing from the PR's own config: `config` comes from the base branch.
  */
 export function evaluate({ root, baseSha, headSha, config, claims, ci, issueLabels = [], agent, model, ledger, ledgerPath = null }, deps = defaultDeps) {
-  const files = deps.git.changedFiles(root, baseSha, headSha);
-  const kind = classifyKind(files.map((f) => f.path), config, { issueLabels });
-  const testFiles = files
-    .filter((f) => f.status !== 'D' && matchesAny(f.path, config.paths.tests) && SAFE_PATH.test(f.path))
-    .map((f) => f.path);
-  const addedLines = deps.git.addedLines(root, baseSha, headSha, testFiles);
-  const tamperNotes = detectTampering({ kind, files, addedLines, claims, config });
+  const { kind, files, testFiles, tamperNotes } = inspect({ root, baseSha, headSha, config, claims, issueLabels }, deps);
   if (tamperNotes.length > 0) return { kind, files, tamperNotes, proof: null, verdict: decide({ kind, tamperNotes }) };
 
   const newTests = files.filter((f) => f.status === 'A' && testFiles.includes(f.path)).map((f) => f.path);
@@ -108,28 +102,19 @@ export function evaluate({ root, baseSha, headSha, config, claims, ci, issueLabe
   return { kind, files, tamperNotes, proof, trust, verdict: decide({ kind, tamperNotes, proof, trust }) };
 }
 
-// Identity is the author login; anyone can name a branch `agent/...`, and a fork
-// can claim any branch name. The branch prefix only narrows a trusted login.
-function notAnAgentPr(pr, config) {
-  if (pr.isFork) return 'PR comes from a fork';
-  if (!config.agents.logins.includes(pr.author)) return `not an agent PR (author ${pr.author} is not in agents.logins)`;
-  const prefixes = config.agents.branchPrefixes;
-  if (prefixes.length > 0 && !prefixes.some((p) => pr.headRef?.startsWith(p))) {
-    return `agent branch ${pr.headRef} does not start with ${prefixes.join(' or ')}`;
-  }
-  return null;
-}
-
 // PROTOTYPE.md flows 1-3, in order:
 //   loadConfig → classifyKind → detectTampering → proveChange → decide
 //   → (enforce mode) merge with trailer → appendOutcome to the ledger
 export async function runCheck(argv, deps = defaultDeps) {
-  const { positionals, flags } = parseFlags(argv, ['local', 'dry-run', 'json'], ['base', 'agent', 'model', 'skill', 'attempt', 'issue', 'ledger']);
+  const { positionals, flags } = parseFlags(argv, ['local', 'dry-run', 'json'], ['base', 'agent', 'model', 'skill', 'attempt', 'issue', 'ledger', 'verdict-out']);
   if (flags.local && positionals.length > 0) {
     throw new UsageError('use either <pr-url> or --local, not both');
   }
   if (flags.local && flags.issue !== null) {
     throw new UsageError('--issue only applies to a pull request, not --local');
+  }
+  if (flags.local && flags['verdict-out'] !== null) {
+    throw new UsageError('--verdict-out only applies to a pull request, not --local');
   }
   if (!flags.local && positionals.length !== 1) {
     throw new UsageError('expected exactly one <pr-url>, or --local');
@@ -183,29 +168,49 @@ export async function runCheck(argv, deps = defaultDeps) {
   }
   const { verdict } = result;
 
-  // Record and merge only for real PR runs. A proven PR is logged even when a
-  // human must merge it, so trust can grow from human merges (shadow mode, cold start).
+  // --verdict-out runs the gate for a separate apply job (M2): like --dry-run
+  // it writes nothing to GitHub or the ledger, and it additionally hands the
+  // verdict to that job as a file.
+  const readOnly = flags['dry-run'] || flags['verdict-out'] !== null;
+  const mode = flags.local
+    ? 'local'
+    : config.mode === 'enforce' && !readOnly
+      ? 'enforce'
+      : flags['dry-run']
+        ? 'dry-run'
+        : flags['verdict-out'] !== null
+          ? 'verdict-out'
+          : config.mode;
   let merged = false;
-  if (pr && !flags['dry-run'] && result.proof?.ok && result.kind && result.kind !== 'deps') {
-    const outcome = {
-      pr: pr.number, url: pr.url, kind: result.kind, agent: input.agent, model: input.model,
-      skill: flags.skill ?? null, attempts, verdict: verdict.verdict,
-      provenAt: deps.now().toISOString(), mergedAt: null, mergeCommit: null, status: 'open',
-    };
-    appendOutcome(ledger, outcome); // fail before merging if the outcome can't be logged
-    if (verdict.verdict === 'MERGE' && config.mode === 'enforce') {
-      const trailer = formatTrailer({ pr: pr.number, kind: result.kind, agent: input.agent, model: input.model, skill: flags.skill, attempts });
-      deps.gh.squashMerge(prUrl, { body: trailer, headSha: pr.headSha });
-      const after = deps.gh.getPullRequest(prUrl);
-      Object.assign(outcome, { status: 'pending', mergedAt: after.mergedAt ?? deps.now().toISOString(), mergeCommit: after.mergeCommit });
-      merged = true;
-    }
-    writeLedger(ledgerPath, appendOutcome(ledger, outcome));
+  let text = `${formatVerdict(verdict)}\n  (${mode}${verdict.verdict === 'MERGE' ? (merged ? ': merged' : ': not merged') : ''})`;
+  if (pr && !readOnly) {
+    ({ merged, text } = land(
+      {
+        prUrl, pr, ledger, ledgerPath, config, verdict,
+        kind: result.kind, proven: result.proof?.ok === true,
+        agent: input.agent, model: input.model, skill: flags.skill, attempts,
+        headSha: pr.headSha, mode,
+      },
+      { gh: deps.gh, now: deps.now },
+    ));
   }
-
-  const mode = config.mode === 'enforce' && !flags['dry-run'] && !flags.local ? 'enforce' : flags.local ? 'local' : flags['dry-run'] ? 'dry-run' : config.mode;
-  const text = `${formatVerdict(verdict)}\n  (${mode}${verdict.verdict === 'MERGE' ? (merged ? ': merged' : ': not merged') : ''})`;
-  if (pr && !flags['dry-run']) deps.gh.comment(prUrl, `\`\`\`\n${text}\n\`\`\``);
+  if (flags['verdict-out'] !== null) {
+    writeVerdictFile(resolve(deps.cwd(), flags['verdict-out']), {
+      schema: VERDICT_FILE_SCHEMA,
+      url: pr.url,
+      pr: pr.number,
+      headSha: input.headSha,
+      kind: result.kind ?? null,
+      verdict: verdict.verdict,
+      notes: verdict.notes,
+      proven: result.proof?.ok === true && !(result.tamperNotes?.length > 0),
+      agent: input.agent,
+      model: input.model,
+      skill: flags.skill ?? null,
+      attempts,
+      issue,
+    });
+  }
   deps.print(flags.json ? JSON.stringify({ ...verdict, mode, merged }, null, 2) : text);
   return EXIT_CODES[verdict.verdict];
 }
