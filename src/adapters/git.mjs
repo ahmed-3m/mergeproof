@@ -8,9 +8,15 @@ import { runProcess } from './process.mjs';
 // array with shell: false, so paths from a PR are never parsed by a shell.
 
 // Hooks and fsmonitor are switched off on every call, so nothing planted in the
-// repo's git config can run when the gate touches git.
+// repo's git config can run when the gate touches git. Diff prefixes are
+// pinned too: a user's diff.noprefix/mnemonicPrefix would emit headers the
+// added-line parser misreads.
 const SAFE_CONFIG = [
   '-c', 'core.quotePath=false',
+  '-c', 'diff.noprefix=false',
+  '-c', 'diff.mnemonicPrefix=false',
+  '-c', 'diff.srcPrefix=a/',
+  '-c', 'diff.dstPrefix=b/',
   '-c', `core.hooksPath=${process.platform === 'win32' ? 'NUL' : '/dev/null'}`,
   '-c', 'core.fsmonitor=false',
 ];
