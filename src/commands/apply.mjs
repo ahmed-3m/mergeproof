@@ -90,7 +90,10 @@ export async function runApply(argv, deps = defaultDeps) {
 
   deps.git.fetch(root, [`+refs/heads/${pr.baseRef}:refs/mergeproof/base`, `+refs/pull/${pr.number}/head:refs/mergeproof/head`]);
   if (deps.git.revParse(root, 'refs/mergeproof/head') !== verdict.headSha) return refuse('PR changed after the gate ran');
-  const config = parseConfig(deps.git.showFile(root, pr.baseSha, CONFIG_FILE), `${CONFIG_FILE} (base ${pr.baseSha.slice(0, 7)})`);
+  // The fetched base tip, the same single snapshot check gated against — never
+  // the API's base SHA, which can lag the fetch.
+  const baseTip = deps.git.revParse(root, 'refs/mergeproof/base');
+  const config = parseConfig(deps.git.showFile(root, baseTip, CONFIG_FILE), `${CONFIG_FILE} (base ${baseTip.slice(0, 7)})`);
 
   const notAgent = notAnAgentPr(pr, config);
   if (notAgent) return refuse(notAgent);
@@ -98,7 +101,7 @@ export async function runApply(argv, deps = defaultDeps) {
 
   // Re-derive kind and the path tamper rules with git only (the same inspect()
   // the gate uses, so the two cannot drift).
-  const baseSha = deps.git.mergeBase(root, pr.baseSha, verdict.headSha);
+  const baseSha = deps.git.mergeBase(root, baseTip, verdict.headSha);
   const claims = { title: pr.title, labels: pr.labels, subjects: pr.subjects };
   const issueLabels = issue ? deps.gh.issueLabels(prUrl, [issue]) : [];
   const { kind, tamperNotes } = inspect({ root, baseSha, headSha: verdict.headSha, config, claims, issueLabels }, deps);

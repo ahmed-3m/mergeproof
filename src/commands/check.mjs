@@ -133,9 +133,13 @@ export async function runCheck(argv, deps = defaultDeps) {
   if (prUrl) {
     pr = deps.gh.getPullRequest(prUrl);
     deps.git.fetch(root, [`+refs/heads/${pr.baseRef}:refs/mergeproof/base`, `+refs/pull/${pr.number}/head:refs/mergeproof/head`]);
+    // One coherent snapshot: the fetched base tip is the single source for the
+    // gate config AND the merge-base, so a PR whose base moved between the API
+    // answer and the fetch cannot make check and apply disagree later.
+    const baseTip = deps.git.revParse(root, 'refs/mergeproof/base');
     input = {
-      baseSha: deps.git.mergeBase(root, pr.baseSha, pr.headSha),
-      configSha: pr.baseSha,
+      baseSha: deps.git.mergeBase(root, baseTip, pr.headSha),
+      configSha: baseTip,
       headSha: pr.headSha,
       claims: { title: pr.title, labels: pr.labels, subjects: pr.subjects },
       ci: gh.checksState(pr.checks),

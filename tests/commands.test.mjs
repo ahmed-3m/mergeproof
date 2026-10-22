@@ -54,7 +54,18 @@ function setup(config = {}) {
 function deps(repo, gh, out) {
   return {
     ...checkDeps,
-    git: { ...checkDeps.git, fetch: () => {} },
+    git: {
+      ...checkDeps.git,
+      // The fixture has no origin: fake the fetch by pointing the requested
+      // refs at the local branches they stand for.
+      fetch: (root, refspecs) => {
+        const local = { 'refs/mergeproof/base': 'main', 'refs/mergeproof/head': 'agent/fix' };
+        for (const rs of refspecs) {
+          const dst = rs.replace(/^\+/, '').split(':')[1];
+          repo.git(['update-ref', dst, repo.git(['rev-parse', local[dst]])]);
+        }
+      },
+    },
     gh,
     cwd: () => repo.dir,
     now: () => new Date('2026-10-22T12:00:00Z'),

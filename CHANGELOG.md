@@ -4,6 +4,9 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Fixed
+- `check` and `apply` now read the gate config and the merge-base from the fetched `refs/mergeproof/base` tip — one coherent snapshot — instead of the PR API's base SHA, which can lag the fetch and make the two jobs derive from different commits.
+
 ### Security
 - The issue workflow's daily cap now stops the run for real: hitting the cap used to `exit 0` inside the context step, which only ends that step — the agent step still ran, with the model key, on empty outputs. The context step now emits a `stopped` output, and the agent and marker steps require `success() && steps.ctx.outputs.stopped != 'true'` (`success()` is load-bearing: a bare `if:` replaces the default success check, so a *failed* context step would otherwise still start the agent). The run count uses `--limit 200` and fails closed at a full page, so the cap can no longer be under-counted past the default page size.
 
