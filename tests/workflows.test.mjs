@@ -26,8 +26,10 @@ const USER_TEXT = [
 ];
 
 /**
- * Every `run: |` block in a workflow or action file: the lines between the
- * `run: |` marker and the first line indented no deeper than it.
+ * Every `run:` script in a workflow or action file: the lines between the
+ * `run: |` marker and the first line indented no deeper than it, plus each
+ * one-line `run: <command>` as its own block — one-line runs interpolate
+ * expressions too, so they are injection surface like the block form.
  */
 function runBlocks(text) {
   const lines = text.split(/\r?\n/);
@@ -40,6 +42,11 @@ function runBlocks(text) {
       current = [];
       indent = m[1].length;
       blocks.push(current);
+      continue;
+    }
+    const one = /^(\s*)run: (.+)$/.exec(line);
+    if (!current && one) {
+      blocks.push([one[2]]);
       continue;
     }
     if (current && (line.trim() === '' || (line.match(/^\s*/) ?? [''])[0].length > indent)) current.push(line);
@@ -118,6 +125,9 @@ for (const [file, text] of Object.entries(TEMPLATES)) {
 
   test(`${file}: every multi-line run uses set -euo pipefail`, () => {
     for (const block of runBlocks(text)) {
+      // One-line runs (gh auth setup-git, the install placeholder) are a
+      // single command with nothing to guard line by line.
+      if (!block.includes('\n')) continue;
       const first = block.split('\n').find((l) => l.trim() !== '');
       assert.match(first ?? '', /set -euo pipefail/, `${file}: every run: | block must start with set -euo pipefail`);
     }

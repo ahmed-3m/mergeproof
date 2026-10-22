@@ -78,13 +78,17 @@ jobs:
           # Everything re-derived below comes from comments authored by
           # github-actions[bot] only: the agent never gets to write its own
           # dispatch marker or attempt count, and comments from every other
-          # author are ignored. Each body is emitted as one JSON string
+          # author is ignored. Each body is emitted as one JSON string
           # (@json escapes newlines and carriage returns), so a marker must
           # match the strict pattern anywhere in a single comment — echoed
           # text that merely starts a line with the marker prefix does not
           # count — and a RETRY counts once per comment, never per line.
+          # No `|| true` here: an empty result is already a valid empty
+          # answer, so a failed fetch must fail the step — swallowing it
+          # would reset the attempt count to 1 and drop the dispatch marker,
+          # re-dispatching an agent that had already been told to retry.
           bodies="$(gh api --paginate "repos/$REPO/issues/$number/comments" \
-            --jq '.[] | select(.user.login == "github-actions[bot]") | @json' || true)"
+            --jq '.[] | select(.user.login == "github-actions[bot]") | @json')"
 
           # The dispatch marker the issue workflow posted:
           #   <!-- mergeproof-dispatch issue=<n> skill=<name@version> -->
