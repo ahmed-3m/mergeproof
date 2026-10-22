@@ -11,6 +11,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - Tamper rules: unsafe file names, gate-file edits, edited, renamed or deleted tests, skip/only markers, kind claims that disagree with the paths, oversized diffs.
 - `check` flags `--base`, `--agent`, `--model`, `--skill`, `--attempt`, `--ledger`; `sync` flags `--dry-run`, `--ledger`, `--ref`.
 - The 8 pre-registered benchmark scenarios run end to end in `tests/benchmarks.test.mjs`; seeded `demo/ledger.json`.
+- `npm run demo` (`demo/build.mjs`) builds a throwaway sample repo with the four demo PRs and prints the gate's verdicts with the seeded ledger and from a cold start; it exits 1 on any unexpected verdict.
 - `check --issue <n>`: the issue the workflow dispatched the agent for.
 - Project scaffold: CLI entry with `check` and `sync` commands, verdict contract (`MERGE | RETRY | HUMAN`) and exit codes, config defaults, stubbed pipeline modules (classify, tamper, prove, decide, ledger, trailer) and adapters (process, git, gh, runner).
 - Specs: `PROTOTYPE.md` (M1 core CLI) and `briefs/m2-autopilot.md` (M2 package).
