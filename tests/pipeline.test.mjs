@@ -1,0 +1,166 @@
+// Pure gate stages: classifyKind → detectTampering → proveChange → decide.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { defaultConfig } from '../src/config.mjs';
+import { classifyKind } from '../src/classify.mjs';
+import { detectTampering } from '../src/tamper.mjs';
+import { proveChange } from '../src/prove.mjs';
+import { decide } from '../src/decide.mjs';
+
+const cfg = defaultConfig();
+
+test('classifyKind derives the kind from paths only', () => {
+  assert.equal(classifyKind(['README.md', 'docs/a.md'], cfg), 'docs');
+  assert.equal(classifyKind(['package-lock.json'], cfg), 'deps');
+  assert.equal(classifyKind(['src/a.js', 'package.json', 'tests/a.test.js'], cfg), 'deps', 'any manifest makes it deps');
+  assert.equal(classifyKind(['src/a.js', 'README.md'], cfg), 'refactor');
+  assert.equal(classifyKind(['src/a.js', 'tests/a.test.js'], cfg), 'feature');
+  assert.equal(classifyKind(['tests/a.test.js'], cfg), null, 'tests only fits no kind');
+  assert.equal(classifyKind([], cfg), null);
+});
+
+test('only a maintainer issue label splits bugfix from feature', () => {
+  const paths = ['src/a.js', 'tests/a.test.js'];
+  assert.equal(classifyKind(paths, cfg, { issueLabels: ['Bug'] }), 'bugfix');
+  assert.equal(classifyKind(paths, cfg, { issueLabels: ['enhancement'] }), 'feature');
+  assert.equal(classifyKind(['src/a.js'], cfg, { issueLabels: ['bug'] }), 'refactor', 'labels never change the family');
+});
+
+function tamperCtx(over = {}) {
+  return {
+    kind: 'feature',
+    files: [
+      { path: 'src/a.js', status: 'M', added: 5, deleted: 1 },
+      { path: 'tests/a.test.js', status: 'A', added: 10, deleted: 0 },
+    ],
+    addedLines: { 'tests/a.test.js': ["test('adds', () => {})"] },
+    claims: { title: 'feat: add a', labels: [], subjects: ['feat: add a'] },
+    config: cfg,
+    ...over,
+  };
+}
+
+const rules = (ctx) => detectTampering(ctx).map((n) => n.rule);
+
+test('an honest change has no tamper notes', () => {
+  assert.deepEqual(detectTampering(tamperCtx()), []);
+  assert.deepEqual(rules(tamperCtx({ claims: { title: 'fix: crash' } })), [], 'feat and fix are one family');
+});
+
+test('each tamper rule fires on its own violation', () => {
+  const base = tamperCtx().files;
+  const cases = [
+    [{ files: [...base, { path: 'tests/old.test.js', status: 'M', added: 1, deleted: 1 }] }, 'existingTestEdited'],
+    [{ files: [...base, { path: 'tests/new.test.js', oldPath: 'tests/old.test.js', status: 'R', added: 0, deleted: 0 }] }, 'existingTestEdited'],
+    [{ files: [...base, { path: 'tests/old.test.js', status: 'D', added: 0, deleted: 9 }] }, 'existingTestDeleted'],
+    [{ addedLines: { 'tests/a.test.js': ["test.skip('adds', () => {})"] } }, 'skipMarkerAdded'],
+    [{ addedLines: { 'tests/a.test.js': ['it.only("x", fn)'] } }, 'skipMarkerAdded'],
+    [{ claims: { title: 'docs: typo' } }, 'kindLabelMismatch'],
+    [{ claims: { labels: ['documentation'] } }, 'kindLabelMismatch'],
+    [{ claims: { subjects: ['chore(deps): bump'] } }, 'kindLabelMismatch'],
+    [{ files: [...base, { path: 'src/big.js', status: 'A', added: 400, deleted: 0 }] }, 'diffTooLarge'],
+    [{ files: [...base, { path: '.mergeproof.json', status: 'M', added: 1, deleted: 1 }] }, 'gateFilesEdited'],
+    [{ files: [...base, { path: '.github/workflows/ci.yml', status: 'M', added: 1, deleted: 1 }] }, 'gateFilesEdited'],
+    [{ files: [...base, { path: 'src/$(rm -rf).js', status: 'A', added: 1, deleted: 0 }] }, 'unsafePath'],
+    [{ files: [...base, { path: '--exec=x.js', status: 'A', added: 1, deleted: 0 }] }, 'unsafePath'],
+  ];
+  for (const [over, rule] of cases) assert.deepEqual(rules(tamperCtx(over)), [rule], JSON.stringify(over));
+});
+
+test('lockfile lines do not count toward the diff limit', () => {
+  const files = [...tamperCtx().files, { path: 'package-lock.json', status: 'M', added: 5000, deleted: 4000 }];
+  assert.deepEqual(rules(tamperCtx({ kind: 'deps', files, claims: {} })), []);
+});
+
+// Fake runners: `outcomes` maps a test file to its result per call, e.g. ['fail', 'pass'].
+function runner(script) {
+  const calls = {};
+  return (files) => {
+    const passed = [];
+    const failed = [];
+    for (const f of files ?? ['(suite)']) {
+      const seq = script[f] ?? ['pass'];
+      const i = (calls[f] = (calls[f] ?? -1) + 1);
+      (seq[Math.min(i, seq.length - 1)] === 'pass' ? passed : failed).push(f);
+    }
+    return { passed, failed };
+  };
+}
+
+function proveCtx({ base = {}, head = {}, ci = 'green', files } = {}) {
+  return {
+    files: files ?? [
+      { path: 'src/a.js', status: 'M' },
+      { path: 'tests/a.test.js', status: 'A' },
+    ],
+    config: cfg,
+    ci,
+    runBase: runner(base),
+    runHead: runner(head),
+  };
+}
+
+test('feature proof: new test fails on base every run and passes on head every run', () => {
+  const p = proveChange('feature', proveCtx({ base: { 'tests/a.test.js': ['fail'] } }));
+  assert.equal(p.ok, true);
+  assert.match(p.notes[0].text, /fail on base 2\/2 and pass on head 3\/3/);
+});
+
+test('feature proof is weak when the new test proves nothing or flakes', () => {
+  const cases = [
+    [{ base: { 'tests/a.test.js': ['pass'] } }, /passes on base, so it proves nothing/],
+    [{ base: { 'tests/a.test.js': ['fail', 'pass'] } }, /flaky on base \(failed 1\/2\)/],
+    [{ base: { 'tests/a.test.js': ['fail'] }, head: { 'tests/a.test.js': ['pass', 'fail', 'pass'] } }, /flaky on head \(passed 2\/3\)/],
+    [{ base: { 'tests/a.test.js': ['fail'] }, head: { 'tests/a.test.js': ['fail'] } }, /fails on head/],
+    [{ base: { 'tests/a.test.js': ['fail'] }, ci: 'red' }, /CI is red/],
+    [{ files: [{ path: 'src/a.js', status: 'M' }, { path: 'tests/a.test.js', status: 'M' }] }, /no new test file/],
+  ];
+  for (const [over, msg] of cases) {
+    const p = proveChange('feature', proveCtx(over));
+    assert.equal(p.ok, false);
+    assert.equal(p.weak, true);
+    assert.ok(p.notes.some((n) => !n.ok && msg.test(n.text)), msg.source);
+  }
+});
+
+test('without CI the full suite runs on head, with one rerun', () => {
+  const files = [{ path: 'src/a.js', status: 'M' }];
+  assert.equal(proveChange('refactor', proveCtx({ files, ci: null, head: { '(suite)': ['fail', 'pass'] } })).ok, true);
+  const p = proveChange('refactor', proveCtx({ files, ci: null, head: { '(suite)': ['fail', 'fail'] } }));
+  assert.equal(p.weak, true);
+  assert.match(p.notes.find((n) => !n.ok).text, /full suite fails on head/);
+});
+
+test('refactor on a red base cannot be proven, which is not the agent fault', () => {
+  const p = proveChange('refactor', proveCtx({ files: [{ path: 'src/a.js', status: 'M' }], base: { '(suite)': ['fail'] } }));
+  assert.deepEqual([p.ok, p.weak], [false, false]);
+});
+
+test('docs and deps proofs need no test runs', () => {
+  const never = () => assert.fail('must not run tests');
+  const docs = proveChange('docs', { files: [{ path: 'README.md', status: 'M' }], config: cfg, ci: 'green', runBase: never, runHead: never });
+  assert.equal(docs.ok, true);
+  const deps = proveChange('deps', { files: [{ path: 'package-lock.json', status: 'M' }], config: cfg, ci: 'green', runBase: never, runHead: never });
+  assert.equal(deps.ok, true);
+});
+
+const strong = { ok: true, weak: false, notes: [{ ok: true, text: 'proof holds' }] };
+const trusted = { trusted: true, text: 'trusted' };
+
+test('decide follows the table in order', () => {
+  const tamper = [{ ok: false, rule: 'existingTestEdited', text: 'edits test' }];
+  assert.equal(decide({ kind: 'feature', tamperNotes: tamper, proof: strong, trust: trusted }).verdict, 'HUMAN');
+  assert.equal(decide({ kind: 'deps', tamperNotes: [], proof: strong, trust: trusted }).verdict, 'HUMAN');
+  assert.equal(decide({ kind: null, tamperNotes: [], proof: { ok: false, weak: false, notes: [] }, trust: trusted }).verdict, 'HUMAN');
+  assert.equal(decide({ kind: 'feature', tamperNotes: [], proof: { ok: false, weak: true, notes: [] }, trust: trusted }).verdict, 'RETRY');
+  assert.equal(decide({ kind: 'refactor', tamperNotes: [], proof: { ok: false, weak: false, notes: [] }, trust: trusted }).verdict, 'HUMAN');
+  assert.equal(decide({ kind: 'feature', tamperNotes: [], proof: strong, trust: { trusted: false, text: 'cold' } }).verdict, 'HUMAN');
+  const merge = decide({ kind: 'feature', tamperNotes: [], proof: strong, trust: trusted });
+  assert.equal(merge.verdict, 'MERGE');
+  assert.deepEqual(merge.notes.map((n) => n.text), ['proof holds', 'trusted']);
+});
+
+test('weak proof outranks missing trust, so the agent gets to retry', () => {
+  const v = decide({ kind: 'feature', tamperNotes: [], proof: { ok: false, weak: true, notes: [] }, trust: { trusted: false, text: 'cold' } });
+  assert.equal(v.verdict, 'RETRY');
+});
