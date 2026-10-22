@@ -1,6 +1,6 @@
 {
   "name": "@ahmed-3m/mergeproof",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Let AI agents merge, only with proof. A zero-dependency trust gate for AI-agent pull requests.",
   "type": "module",
   "license": "MIT",
@@ -13,12 +13,16 @@
   "bugs": {
     "url": "https://github.com/ahmed-3m/mergeproof/issues"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
     "mergeproof": "bin/mergeproof.mjs"
   },
   "scripts": {
     "test": "node --test tests/cli.test.mjs tests/verdict.test.mjs tests/args.test.mjs tests/structure.test.mjs tests/config.test.mjs tests/glob.test.mjs tests/pipeline.test.mjs tests/runner.test.mjs tests/ledger.test.mjs tests/commands.test.mjs tests/apply.test.mjs tests/benchmarks.test.mjs tests/demo.test.mjs tests/workflows.test.mjs",
-    "demo": "node demo/build.mjs"
+    "demo": "node demo/build.mjs",
+    "prepublishOnly": "npm test"
   },
   "files": [
     "bin/",

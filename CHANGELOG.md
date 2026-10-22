@@ -4,6 +4,11 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+- Nothing yet.
+
+## [0.1.0] - 2026-10-23
+
 ### Fixed
 - CLI and adapter edges: `--` ends flag parsing instead of erroring; PR URLs with browser suffixes (`/files`, `?w=1`, `#fragment`) parse; and the proof-run fingerprint now also covers `.git`'s `refs/`, `HEAD`, `packed-refs` and `objects/info/alternates`, closing the same shared-`.git` write class as hooks and config.
 - `check` in `mode: off` no longer comments on the PR: off now means off for both halves of the split (apply already wrote nothing).
