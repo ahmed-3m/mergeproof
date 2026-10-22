@@ -28,6 +28,7 @@ mergeproof decides whether code written by an AI agent may be merged, so it trea
 | PR code reads credentials | Test runs get an environment with `*TOKEN*`, `*SECRET*`, `*PASSWORD*` and `*API_KEY*` variables removed |
 | Shell injection through file names | Changed paths outside `[A-Za-z0-9_@+./-]` (or starting with `-`) are tampering, and the runner refuses them |
 | The PR edits the gate workflow so a weaker copy gates its own CI | The PR workflow triggers on `workflow_run`, which always runs the default-branch definition — the PR's edited copy never executes; editing `.github/**` is a tamper rule anyway (`HUMAN`, no retry) |
+| A push lands after the CI run that triggered the gate, so the gate judges (and apply merges) a commit the repo's CI never covered | The workflow passes `--head <sha>` (the head whose CI completed) to both jobs; `check` stands down with `HUMAN` and no proof runs when the live head differs, and its verdict file names the CI'd commit so `apply`'s moved-head check refuses it with nothing written. The push's own CI fires a fresh gate run |
 | The agent forges its own dispatch context (issue number, skill, attempt) on the PR | The PR workflow reads only comments authored by `github-actions[bot]` — the dispatch marker for issue/skill, `Mergeproof — RETRY` comments for the attempt count — and ignores every other author; agent and model come from repo variables, never the PR |
 
 ## Workflow permissions

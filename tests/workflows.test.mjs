@@ -167,6 +167,7 @@ test('pr workflow: the gate job is read-only and writes the verdict file', () =>
   assert.doesNotMatch(gate, /secrets\./, 'the gate job must see no secrets');
   assert.match(gate, /GH_TOKEN: \$\{\{ github\.token \}\}/);
   assert.match(gate, /command: check/);
+  assert.match(gate, /--head \$\{\{ needs\.context\.outputs\.head-sha \}\}/, 'the gate pins the head whose CI completed');
   assert.match(gate, /--verdict-out/);
   assert.match(gate, /\{\{INSTALL_COMMAND\}\}/, 'the gate job installs the repo dependencies for the proof');
   assert.match(gate, /upload-artifact/, 'the verdict file is uploaded for the apply job');
@@ -177,6 +178,7 @@ test('pr workflow: the apply job lands the verdict and never installs anything',
   assert.ok(apply, 'pr workflow needs an apply job');
   assert.match(apply, /command: apply/);
   assert.match(apply, /--pr \$\{\{ needs\.context\.outputs\.pr-url \}\}/, 'the PR comes from the event, not from the artifact');
+  assert.match(apply, /--head \$\{\{ needs\.context\.outputs\.head-sha \}\}/, 'apply pins the same head the gate gated');
   assert.doesNotMatch(apply, /\{\{INSTALL_COMMAND\}\}/, 'the apply job must never run an install command');
   assert.match(apply, /GH_TOKEN: \$\{\{ secrets\.MERGEPROOF_BOT_TOKEN \}\}/, 'the merge uses the bot token so it triggers the push CI');
   assert.match(apply, /group: mergeproof-ledger/);

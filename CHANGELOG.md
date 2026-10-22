@@ -5,6 +5,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ## [Unreleased]
 
 ### Fixed
+- The workflow now pins the gated head end to end: `check` and `apply` take `--head <sha>` (the head whose CI completed, from the triggering `workflow_run` event). A PR that moved after its CI makes `check` stand down — `HUMAN`, no proof runs, nothing written, and the verdict file names the CI'd commit with `proven: false` — so `apply`'s moved-head refusal supersedes the stale run with no label, comment or merge, and the push's own CI starts a fresh gate. Previously the gate judged the live head, whose checks read `none` (the local-suite fallback), and `apply` treated `none` as proof-OK: a merged commit could skip the repo's CI entirely. `apply` also refuses (as tampering) a verdict file whose head disagrees with the workflow's `--head`.
 - `check` and `apply` now read the gate config and the merge-base from the fetched `refs/mergeproof/base` tip — one coherent snapshot — instead of the PR API's base SHA, which can lag the fetch and make the two jobs derive from different commits.
 
 ### Security

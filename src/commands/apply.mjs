@@ -25,12 +25,13 @@ export const HUMAN_LABEL = 'needs-human';
 // is re-derived here, because the file is written in the job that ran PR code
 // and every field in it is attacker-controlled.
 export async function runApply(argv, deps = defaultDeps) {
-  const { positionals, flags } = parseFlags(argv, ['dry-run', 'json'], ['pr', 'ledger', 'agent', 'model', 'skill', 'attempt', 'issue']);
+  const { positionals, flags } = parseFlags(argv, ['dry-run', 'json'], ['pr', 'ledger', 'agent', 'model', 'skill', 'attempt', 'issue', 'head']);
   if (positionals.length !== 1) throw new UsageError('expected exactly one <verdict-file>');
   // The PR comes from the workflow (the event that triggered it), never from the
   // file: a file naming another PR would borrow this PR's proof for that one.
   const prUrl = flags.pr;
   if (!prUrl || !gh.parsePrUrl(prUrl)) throw new UsageError('apply requires --pr <pr-url> (the pull request the gate job checked)');
+  if (flags.head !== null && !/^[0-9a-f]{40}$/.test(flags.head)) throw new UsageError('--head must be a 40-character commit sha');
   const agent = flags.agent;
   const model = flags.model;
   if (!agent || !model) throw new UsageError('apply requires --agent and --model (the same values the gate job got)');
@@ -64,6 +65,12 @@ export async function runApply(argv, deps = defaultDeps) {
   const fromFlags = { agent, model, skill, attempts, issue };
   const fromFile = { agent: verdict.agent, model: verdict.model, skill: verdict.skill, attempts: verdict.attempts, issue: verdict.issue };
   if (Object.keys(fromFlags).some((k) => fromFile[k] !== fromFlags[k])) {
+    return suspect("verdict file does not match the workflow's flags");
+  }
+  // The workflow pins the head its event's CI completed and passes the same
+  // --head to both jobs; a file naming a different head was not written by
+  // this workflow's gate.
+  if (flags.head !== null && flags.head !== verdict.headSha) {
     return suspect("verdict file does not match the workflow's flags");
   }
 

@@ -162,6 +162,7 @@ jobs:
           command: check
           args: >-
             ${{ needs.context.outputs.pr-url }}
+            --head ${{ needs.context.outputs.head-sha }}
             --verdict-out ${{ runner.temp }}/verdict.json
             --agent ${{ needs.context.outputs.agent }}
             --model ${{ needs.context.outputs.model }}
@@ -241,6 +242,7 @@ jobs:
           args: >-
             ${{ runner.temp }}/verdict.json
             --pr ${{ needs.context.outputs.pr-url }}
+            --head ${{ needs.context.outputs.head-sha }}
             --agent ${{ needs.context.outputs.agent }}
             --model ${{ needs.context.outputs.model }}
             ${{ needs.context.outputs.skill-args }}

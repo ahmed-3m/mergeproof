@@ -106,7 +106,7 @@ export function evaluate({ root, baseSha, headSha, config, claims, ci, issueLabe
 //   loadConfig → classifyKind → detectTampering → proveChange → decide
 //   → (enforce mode) merge with trailer → appendOutcome to the ledger
 export async function runCheck(argv, deps = defaultDeps) {
-  const { positionals, flags } = parseFlags(argv, ['local', 'dry-run', 'json'], ['base', 'agent', 'model', 'skill', 'attempt', 'issue', 'ledger', 'verdict-out']);
+  const { positionals, flags } = parseFlags(argv, ['local', 'dry-run', 'json'], ['base', 'agent', 'model', 'skill', 'attempt', 'issue', 'ledger', 'verdict-out', 'head']);
   if (flags.local && positionals.length > 0) {
     throw new UsageError('use either <pr-url> or --local, not both');
   }
@@ -115,6 +115,12 @@ export async function runCheck(argv, deps = defaultDeps) {
   }
   if (flags.local && flags['verdict-out'] !== null) {
     throw new UsageError('--verdict-out only applies to a pull request, not --local');
+  }
+  if (flags.local && flags.head !== null) {
+    throw new UsageError('--head only applies to a pull request, not --local');
+  }
+  if (flags.head !== null && !/^[0-9a-f]{40}$/.test(flags.head)) {
+    throw new UsageError('--head must be a 40-character commit sha');
   }
   if (!flags.local && positionals.length !== 1) {
     throw new UsageError('expected exactly one <pr-url>, or --local');
@@ -158,6 +164,41 @@ export async function runCheck(argv, deps = defaultDeps) {
   // The gate config is today's base branch tip, never the PR and never an old
   // merge-base the PR happened to branch from.
   const config = parseConfig(deps.git.showFile(root, input.configSha, CONFIG_FILE), `${CONFIG_FILE} (base ${input.configSha.slice(0, 7)})`);
+
+  // The workflow pins the head whose CI completed (--head, from the triggering
+  // event). If the PR has moved since, gating the live head would judge a
+  // commit its CI never covered; this run stands down instead and the push's
+  // own CI starts a fresh one. The verdict file still gets written — naming
+  // the CI'd commit, proven false — so apply's moved-head refusal supersedes
+  // this run with nothing written: no label, no comment, no merge.
+  if (pr && flags.head !== null && pr.headSha !== flags.head) {
+    const baseSha = deps.git.mergeBase(root, input.configSha, flags.head);
+    const { kind } = inspect({ root, baseSha, headSha: flags.head, config, claims: input.claims, issueLabels: input.issueLabels }, deps);
+    const verdict = makeVerdict('HUMAN', { kind, notes: [{ ok: false, text: 'PR changed after its CI completed; the new head gets its own gate run' }] });
+    if (flags['verdict-out'] !== null) {
+      writeVerdictFile(resolve(deps.cwd(), flags['verdict-out']), {
+        schema: VERDICT_FILE_SCHEMA,
+        url: pr.url,
+        pr: pr.number,
+        headSha: flags.head,
+        kind: kind ?? null,
+        verdict: verdict.verdict,
+        notes: verdict.notes,
+        proven: false,
+        agent: input.agent,
+        model: input.model,
+        skill: flags.skill ?? null,
+        attempts,
+        issue,
+      });
+    }
+    deps.print(
+      flags.json
+        ? JSON.stringify({ ...verdict, mode: 'superseded', merged: false }, null, 2)
+        : `${formatVerdict(verdict)}\n  (superseded: the PR changed after its CI completed; nothing written)`,
+    );
+    return EXIT_CODES.HUMAN;
+  }
 
   // Read once, before any PR code runs; the outcome is appended to this copy.
   const ledger = readLedger(ledgerPath);
