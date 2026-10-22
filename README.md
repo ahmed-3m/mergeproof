@@ -12,11 +12,15 @@ Coding agents (Copilot, Codex, OpenHands, Claude Code, GLM through Claude Code) 
 
 ## Usage
 
+A workflow calls the gate on the agent's pull request; agents preflight locally before opening one:
+
 ```bash
-npx @ahmed-3m/mergeproof check https://github.com/you/repo/pull/42 --dry-run
+npx @ahmed-3m/mergeproof check https://github.com/you/repo/pull/42 --agent claude-code --model glm-5.2 --issue 17
 npx @ahmed-3m/mergeproof check --local      # preflight, run by agents before opening a PR
 npx @ahmed-3m/mergeproof sync               # settle the ledger, record reverts
 ```
+
+`--issue <n>` is the issue the agent was dispatched for: a maintainer `bug` label on it makes the PR a bugfix (otherwise a feature). Only PRs by an author listed in `agents.logins` in `.mergeproof.json`, on a branch matching `agents.branchPrefixes`, are gated — anyone can name a branch `agent/...`, and fork PRs always go to a human.
 
 ```text
 Mergeproof — HUMAN (kind: bugfix)
