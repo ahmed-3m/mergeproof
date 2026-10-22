@@ -123,6 +123,19 @@ for (const [file, text] of Object.entries(TEMPLATES)) {
     }
   });
 
+  test(`${file}: expressions use only functions GitHub Actions has`, () => {
+    // An unknown function (split, includes, ...) fails the whole workflow at
+    // evaluation time, so it never shows up until a real event fires.
+    const known = new Set(['contains', 'startsWith', 'endsWith', 'format', 'join', 'toJSON', 'fromJSON', 'hashFiles', 'success', 'always', 'cancelled', 'failure', 'case']);
+    const exprs = [...text.matchAll(/\$\{\{([\s\S]*?)\}\}/g)].map((m) => m[1]);
+    exprs.push(...[...text.matchAll(/^\s*if:\s*(.+)$/gm)].map((m) => m[1]));
+    for (const expr of exprs) {
+      for (const [, fn] of expr.replace(/'[^']*'/g, "''").matchAll(/([A-Za-z_][\w]*)\s*\(/g)) {
+        assert.ok(known.has(fn), `${file}: ${fn}() is not a GitHub Actions expression function`);
+      }
+    }
+  });
+
   test(`${file}: no user-controlled event text inside any run: block`, () => {
     for (const block of runBlocks(text)) {
       for (const banned of USER_TEXT) {
@@ -170,6 +183,7 @@ test('pr workflow: the gate job is read-only and writes the verdict file', () =>
   assert.doesNotMatch(gate, /: write/, 'the gate job must hold no write permission');
   assert.doesNotMatch(gate, /secrets\./, 'the gate job must see no secrets');
   assert.match(gate, /GH_TOKEN: \$\{\{ github\.token \}\}/);
+  assert.match(gate, /gh auth setup-git/, 'private repos: git fetches authenticate with the read-only token (persist-credentials is false)');
   assert.match(gate, /command: check/);
   assert.match(gate, /--head \$\{\{ needs\.context\.outputs\.head-sha \}\}/, 'the gate pins the head whose CI completed');
   assert.match(gate, /--verdict-out/);

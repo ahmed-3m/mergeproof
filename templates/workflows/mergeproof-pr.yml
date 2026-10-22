@@ -139,6 +139,15 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
           persist-credentials: false
+      - name: Authenticate git for the gate's fetches (private repos)
+        # persist-credentials: false leaves git unauthenticated, and the gate's
+        # `check` fetches the PR and base refs over the network. Public repos
+        # fetch anonymously; private ones need the read-only github.token as a
+        # git credential. PR test code never sees it: the test environment
+        # strips *TOKEN* variables, and the helper only answers git prompts.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh auth setup-git
       - name: Check out the ledger branch (skip when it does not exist yet)
         env:
           LEDGER_BRANCH: mergeproof-ledger
