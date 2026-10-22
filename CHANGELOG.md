@@ -1,0 +1,19 @@
+# Changelog
+
+All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/).
+
+## [Unreleased]
+
+### Added
+- M1 gate: `check <pr-url>` and `check --local` run classify → tamper → prove → decide. Per-kind proof runs in throwaway git worktrees: new test files must fail on base 2/2 and pass on head 3/3. Enforce mode merges pinned to the proven head with a `Mergeproof-Verdict` trailer. Every proven PR is logged to `.mergeproof/ledger.json`, so human merges earn trust too.
+- `sync` settles the ledger (open → pending → clean or reverted) and opens a human-triage issue for each revert.
+- Config is `.mergeproof.json` (YAML later), validated strictly and read from the base commit. New keys: `testFileCommand`, `issueLabels.bugfix`, `limits.testTimeoutSec`.
+- Tamper rules: unsafe file names, gate-file edits, edited, renamed or deleted tests, skip/only markers, kind claims that disagree with the paths, oversized diffs.
+- `check` flags `--base`, `--agent`, `--model`, `--skill`, `--attempt`, `--ledger`; `sync` flags `--dry-run`, `--ledger`, `--ref`.
+- The 8 pre-registered benchmark scenarios run end to end in `tests/benchmarks.test.mjs`; seeded `demo/ledger.json`.
+
+### Security
+- Test runs drop credential-like environment variables and `NODE_TEST_CONTEXT` (an inherited value made a nested `node --test` exit 0 on failure).
+- Project scaffold: CLI entry with `check` and `sync` commands, verdict contract (`MERGE | RETRY | HUMAN`) and exit codes, config defaults, stubbed pipeline modules (classify, tamper, prove, decide, ledger, trailer) and adapters (process, git, gh, runner).
+- Specs: `PROTOTYPE.md` (M1 core CLI) and `briefs/m2-autopilot.md` (M2 package).
+- Tests for the CLI, verdict formatting, flag parsing and repo invariants; CI on Node 18/22/24 for Linux and Windows.

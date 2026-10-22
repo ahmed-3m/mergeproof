@@ -1,0 +1,50 @@
+# mergeproof
+
+**Let AI agents merge, only with proof.**
+
+> Status: pre-alpha. The M1 gate (`check`, `check --local`, `sync`) is built and tested against the [pre-registered scenarios](benchmarks/specs.md); not published to npm yet. See [PROTOTYPE.md](PROTOTYPE.md) for the spec.
+
+Coding agents (Copilot, Codex, OpenHands, Claude Code, GLM through Claude Code) can already turn an issue into a pull request. The hard part is deciding whether that PR is safe to merge without a human. `mergeproof` is a zero-dependency, LLM-free gate that makes that decision:
+
+1. **Inspect.** Flags test tampering: edited or deleted tests, new skip markers, edits to the gate config or workflows, labels that disagree with the changed paths, oversized diffs.
+2. **Prove.** Requires proof that fits the task kind. Feature and bugfix PRs need new tests that fail on base and pass on head. Refactor PRs must leave tests untouched and pass on both. Docs and deps PRs must stay within their paths.
+3. **Decide and learn.** Returns `MERGE`, `RETRY` or `HUMAN`. Autonomy is earned per task kind and per agent from a ledger of past outcomes, and lost on a revert.
+
+## Usage
+
+```bash
+npx @ahmed-3m/mergeproof check https://github.com/you/repo/pull/42 --dry-run
+npx @ahmed-3m/mergeproof check --local      # preflight, run by agents before opening a PR
+npx @ahmed-3m/mergeproof sync               # settle the ledger, record reverts
+```
+
+```text
+Mergeproof — HUMAN (kind: bugfix)
+  ✗ edits existing test tests/parser.test.js
+  (shadow)
+```
+
+Configure it with an optional `.mergeproof.json` in the repo root (read from the base branch, never the PR); see [docs/architecture.md](docs/architecture.md#config-mergeproofjson). New installs run in `shadow` mode: verdicts are reported, nothing is merged.
+
+Exit codes: `0` MERGE, `3` RETRY, `4` HUMAN, `2` usage error, `1` other error.
+
+## Roadmap
+
+| Milestone | Scope | Spec |
+|---|---|---|
+| **M1: core CLI** | `check`, `check --local`, `sync`, config, ledger, trailer | [PROTOTYPE.md](PROTOTYPE.md) |
+| **M2: autopilot package** | `mergeproof init`, reusable GitHub Action, issue → skill-guided agent → PR → gate, same-PR retries, shadow mode | [briefs/m2-autopilot.md](briefs/m2-autopilot.md) |
+| v2 | GitHub App, hosted dashboard, org policies | — |
+
+## Development
+
+```bash
+node --version   # >= 18.17
+npm test         # no install step, ever: zero dependencies
+```
+
+See [AGENTS.md](AGENTS.md) for architecture and hard constraints, and [docs/architecture.md](docs/architecture.md) for the module map.
+
+## License
+
+MIT © ahmed-3m
