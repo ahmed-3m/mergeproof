@@ -5,6 +5,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ## [Unreleased]
 
 ### Fixed
+- `sync` opens the human-triage regression issues before settling the ledger: a failed issue creation used to mark the outcome reverted on disk anyway, permanently losing the triage issue; now the outcome stays pending and the next sync retries it (the residual failure mode is a visible duplicate issue).
 - Git diff prefixes are pinned (`diff.noprefix=false`, `diff.mnemonicPrefix=false`, `srcPrefix`/`dstPrefix`): a machine's noprefix setting emitted `+++` headers the added-line parser misread, corrupting skip-marker note paths.
 - Colored test output no longer disables the dropped-test-count check: `parseTestCount` strips ANSI escapes (SGR, cursor, OSC) before matching, and proof runs set `NO_COLOR=1` with `FORCE_COLOR=0` (CI often forces color on, and FORCE_COLOR overrides NO_COLOR in several runners), so a refactor that makes test cases disappear cannot hide behind a colored summary.
 - Renaming a manifest away (`package-lock.json` → `old/package-lock.json`) classifies as `deps`, not `refactor`: classification now sees a rename's old path too, so a manifest cannot be walked out of the never-auto-merged bucket.

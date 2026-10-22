@@ -382,3 +382,38 @@ test('renaming a manifest away is still a dependency change', async () => {
     repo.cleanup();
   }
 });
+
+test('a failed triage issue leaves the ledger pending for the next sync', async () => {
+  const repo = createRepo();
+  try {
+    const ledgerPath = join(repo.dir, '.mergeproof', 'ledger.json');
+    const mergedSha = repo.git(['rev-parse', 'HEAD']);
+    repo.git(['revert', '--no-edit', 'HEAD']);
+    writeLedger(ledgerPath, { ...emptyLedger(), outcomes: [{ ...base, pr: 7, status: 'pending', mergedAt: new Date().toISOString(), mergeCommit: mergedSha }] });
+    await assert.rejects(
+      runSync([], {
+        ...syncDeps,
+        gh: { getPullRequest: () => assert.fail('no open PRs to look up'), createIssue: () => { throw new Error('rate limited'); } },
+        cwd: () => repo.dir,
+        print: () => {},
+      }),
+      /rate limited/,
+    );
+    assert.equal(readLedger(ledgerPath).outcomes[0].status, 'pending', 'the ledger on disk is untouched, so the next sync retries the issue');
+  } finally {
+    repo.cleanup();
+  }
+});
+
+test('mode off writes nothing to GitHub, like apply', async () => {
+  const { repo, baseSha, headSha } = setup({ mode: 'off' });
+  try {
+    const gh = fakeGh(repo, { baseSha, headSha });
+    const out = [];
+    assert.equal(await runCheck([URL, ...PR_ARGS], deps(repo, gh, out)), 4, out.join('\n'));
+    assert.match(out[0], /mergeproof is off/);
+    assert.deepEqual([gh.calls.merge.length, gh.calls.comment.length], [0, 0], 'an off gate comments nothing either');
+  } finally {
+    repo.cleanup();
+  }
+});
