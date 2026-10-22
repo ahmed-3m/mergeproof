@@ -99,6 +99,11 @@ export function evaluate({ root, baseSha, headSha, config, claims, ci, issueLabe
     const note = { ok: false, rule: 'testRunTamperedRepo', text: 'test run changed the git config, hooks or ledger' };
     return { kind, files, tamperNotes: [note], proof: null, tampered, verdict: decide({ kind, tamperNotes: [note] }) };
   }
+  // Tampering found during the proof (a dropped test count), not a failed
+  // proof: HUMAN with no retry. proof.ok is false, so the PR is never recorded.
+  if (proof.tamperNotes?.length > 0) {
+    return { kind, files, tamperNotes: proof.tamperNotes, proof, verdict: decide({ kind, tamperNotes: proof.tamperNotes }) };
+  }
   const trust = kind ? trustFor(ledger, { kind, agent, model }, config.trust) : null;
   return { kind, files, tamperNotes, proof, trust, verdict: decide({ kind, tamperNotes, proof, trust }) };
 }

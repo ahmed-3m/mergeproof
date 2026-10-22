@@ -37,18 +37,20 @@ Feature and bugfix have the same proof, so the label only picks the trust bucket
 
 `unsafePath` (file names outside `[A-Za-z0-9_@+./-]`, or starting with `-`), `gateFilesEdited`, `existingTestEdited` (modified or renamed), `existingTestDeleted`, `skipMarkerAdded` (`.skip`, `.only`, `.todo`, `xit`, `@pytest.mark.skip`...), `kindLabelMismatch`, `diffTooLarge` (lockfiles don't count). Rules are plain functions in `TAMPER_RULES`, so new ones drop in as agents adapt.
 
-A dropped test-case count is not checked yet. Proof runs per test file using exit codes, so it works with any runner, and existing test files can't change anyway. Counting individual cases needs per-runner output parsing and comes later.
+`testCountDropped` needs the suite output, not the diff, so the refactor proof finds it instead of the path rules: a refactor may not touch test files, but it can still make cases disappear — a test file that generates its cases from a list in `src/`, where the PR deletes entries. The full-suite runs on base and head also count test cases (`parseTestCount` in the runner adapter: node:test spec and TAP, jest, vitest, pytest; when a run reports several summaries, the last one counts). Fewer cases on head than base is tampering → `HUMAN`, and the PR is not logged. When either side's count does not parse, the check is skipped, so unknown runners keep working.
 
 ## Proof per kind
 
 | Kind | Proof |
 |---|---|
 | feature, bugfix | Every new test file fails on base `baseFailRuns` of `baseFailRuns` runs and passes on head `headPassRuns` of `headPassRuns` runs, run with `testFileCommand <file>` |
-| refactor | Full suite (`testCommand`) green on base |
+| refactor | Full suite (`testCommand`) green on base and on head; the counted test cases must not drop |
 | docs | Nothing to run |
 | deps | Nothing to run; never merged |
 
-Then every kind except deps needs CI green. Without a CI result (local preflight, or a repo with no checks) the full suite runs on head instead, with `headReruns` reruns before a failure counts. Checks whose name contains `mergeproof` are ignored, since the gate's own job is still running.
+Then every kind except deps needs CI green. Without a CI result (local preflight, or a repo with no checks) the full suite runs on head instead, with `headReruns` reruns before a failure counts; a refactor runs the head suite even with a CI result, because flow 2 needs green on base and head and the case count has to be compared. Checks whose name contains `mergeproof` are ignored, since the gate's own job is still running.
+
+Feature and bugfix changes get no count check: their base worktree carries the PR's new (and there failing) test files, so a base full-suite count is not comparable to head's.
 
 ## Decision table
 

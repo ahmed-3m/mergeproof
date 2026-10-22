@@ -5,6 +5,11 @@ import { SAFE_PATH } from '../tamper.mjs';
 // any runner works: `testFileCommand` runs one file (node --test, npx jest,
 // npx vitest run, pytest), `testCommand` runs the whole suite.
 //
+// Full-suite runs also report `count`, the number of test cases parsed from the
+// combined stdout+stderr (parseTestCount below), so the refactor proof can
+// catch a dropped test count. Pass/fail still comes from the exit code alone;
+// a count that doesn't parse is null and never fails a proof on its own.
+//
 // Commands come from the base branch's config (trusted) and are split on
 // whitespace. On Windows they run through the shell so npm/npx .cmd shims
 // resolve (CVE-2024-27980); the only untrusted argument, the test file path, is
@@ -29,20 +34,60 @@ function run(cwd, command, extra, timeoutSec) {
     env: cleanEnv(),
     timeoutMs: timeoutSec * 1000,
   });
-  return res.code === 0 && !res.timedOut;
+  return { ok: res.code === 0 && !res.timedOut, output: `${res.stdout}\n${res.stderr}` };
 }
 
-/** @returns {{ passed: string[], failed: string[] }} */
+// Case counts per runner summary. Formats are tried in order and the last
+// match of the first one that fits wins, so a suite that reports several
+// summaries counts its final run. No end-of-line anchor: Windows \r doesn't
+// break a count that sits before it.
+const COUNT_FORMATS = [
+  /^(?:ℹ|i) tests (\d+)/gm, // node:test spec reporter (with or without the glyph)
+  /^# tests (\d+)/gm, // TAP (node:test tap reporter, prove, ...)
+  /^Tests:.*?(\d+) total/gm, // jest
+  /^[ \t]*Tests\s+[^\n]*?\((\d+)\)/gm, // vitest: the total is the number in parentheses
+];
+
+// pytest: `... 3 passed, 1 failed, 2 errors in 0.12s ...` — sum the case counts.
+const PYTEST_SUMMARY = /^[ \t]*=+ (.*) in \S+ =+[^\S\n]*$/gm;
+const PYTEST_COUNTS = /(\d+) (passed|failed|errors?|skipped|xfailed|xpassed)\b/g;
+
+/** Number of test cases in a runner's output, or null when no summary parses. */
+export function parseTestCount(output) {
+  const text = String(output ?? '');
+  for (const format of COUNT_FORMATS) {
+    format.lastIndex = 0;
+    let last = null;
+    for (let m = format.exec(text); m !== null; m = format.exec(text)) last = Number(m[1]);
+    if (last !== null) return last;
+  }
+  PYTEST_SUMMARY.lastIndex = 0;
+  let total = null;
+  for (let m = PYTEST_SUMMARY.exec(text); m !== null; m = PYTEST_SUMMARY.exec(text)) {
+    PYTEST_COUNTS.lastIndex = 0;
+    let sum = 0;
+    let found = false;
+    for (let c = PYTEST_COUNTS.exec(m[1]); c !== null; c = PYTEST_COUNTS.exec(m[1])) {
+      sum += Number(c[1]);
+      found = true;
+    }
+    if (found) total = sum; // e.g. "no tests ran in 0.01s" is not a count
+  }
+  return total;
+}
+
+/** @returns {{ passed: string[], failed: string[], count?: number|null }} */
 export function runTests(repoRoot, { testCommand, testFileCommand, only = null, timeoutSec = 600 }) {
   const passed = [];
   const failed = [];
   if (only === null) {
-    (run(repoRoot, testCommand, [], timeoutSec) ? passed : failed).push(SUITE);
-    return { passed, failed };
+    const { ok, output } = run(repoRoot, testCommand, [], timeoutSec);
+    (ok ? passed : failed).push(SUITE);
+    return { passed, failed, count: parseTestCount(output) };
   }
   for (const file of only) {
     if (!SAFE_PATH.test(file)) throw new Error(`refusing to run unsafe test path ${JSON.stringify(file)}`);
-    (run(repoRoot, testFileCommand, [file], timeoutSec) ? passed : failed).push(file);
+    (run(repoRoot, testFileCommand, [file], timeoutSec).ok ? passed : failed).push(file);
   }
   return { passed, failed };
 }

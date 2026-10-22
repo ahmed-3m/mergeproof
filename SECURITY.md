@@ -11,6 +11,7 @@ mergeproof decides whether code written by an AI agent may be merged, so it trea
 | Threat | Mitigation |
 |---|---|
 | Agent edits or deletes tests to get a green run | Tamper rules block it with a `HUMAN` verdict; no retry |
+| A refactor makes test cases disappear without touching a test file (e.g. deletes entries of a list the tests generate their cases from) | Refactor proof counts test cases on base and head; fewer on head is the `testCountDropped` tamper rule (`HUMAN`, nothing logged) |
 | New tests that prove nothing | Feature and bugfix tests must fail on base and pass on head |
 | Agent mislabels a PR to reach a trusted kind | Kind comes from changed paths only; label mismatch is tampering |
 | Compromised dependency passes every test | Deps PRs never auto-merge in v1 |
