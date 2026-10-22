@@ -199,6 +199,7 @@ test('issue workflow: gates who may start the agent', () => {
 test('issue workflow: daily cap and dispatch marker', () => {
   const issue = TEMPLATES['mergeproof-issue.yml'];
   assert.match(issue, /gh run list --workflow mergeproof-issue\.yml --created/);
+  assert.match(issue, /--limit 200/, 'the run count must not clip at the default page size');
   assert.match(issue, /MERGEPROOF_DAILY_LIMIT/);
   assert.match(issue, /<!-- mergeproof-dispatch issue=\$ISSUE_NUMBER skill=\$SKILL -->/);
   assert.match(issue, /GH_TOKEN: \$\{\{ github\.token \}\}/, 'the marker is posted with the default token (author github-actions[bot])');
@@ -207,6 +208,23 @@ test('issue workflow: daily cap and dispatch marker', () => {
   for (const input of ['anthropic_api_key', 'github_token', 'claude_args', 'prompt']) {
     assert.match(issue, new RegExp(`${input}:`), `the agent step must keep its ${input} input`);
   }
+});
+
+test('issue workflow: the daily cap stops the agent step, and so does a failed context step', () => {
+  const issue = TEMPLATES['mergeproof-issue.yml'];
+  // exit 0 in the ctx step only ends that step; the later steps must guard on
+  // its stopped output. success() is load-bearing: a bare if: would REPLACE
+  // the default success check, letting a failed ctx step start the agent.
+  assert.match(issue, /echo "stopped=true" >> "\$GITHUB_OUTPUT"/);
+  const guarded = [...issue.matchAll(/^ {6}- name: ([^\n]+)\n {8}if: success\(\) && steps\.ctx\.outputs\.stopped != 'true'\n/gm)].map((m) => m[1]);
+  assert.ok(
+    guarded.some((n) => n.includes('coding agent')),
+    'the agent step must be guarded by success() && stopped != true',
+  );
+  assert.ok(
+    guarded.some((n) => n.includes('dispatch marker')),
+    'the marker step must be guarded by success() && stopped != true',
+  );
 });
 
 test('sync workflow: nightly, on the shared ledger concurrency group', () => {

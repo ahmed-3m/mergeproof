@@ -86,11 +86,14 @@ jobs:
           fi
 
           # Daily cap: count today's runs of this workflow (this one included).
+          # Fail closed: gh caps a page at 200 runs, so a full page means the
+          # cap is hit even when the count is clipped.
           today="$(date -u +%F)"
-          runs="$(gh run list --workflow mergeproof-issue.yml --created ">=$today" --json databaseId --jq 'length')"
-          if [ "$runs" -ge "$DAILY_LIMIT" ]; then
+          runs="$(gh run list --workflow mergeproof-issue.yml --created ">=$today" --limit 200 --json databaseId --jq 'length')"
+          if [ "$runs" -ge "$DAILY_LIMIT" ] || [ "$runs" -eq 200 ]; then
             gh issue comment "$ISSUE_NUMBER" --repo "$REPO" \
               --body "Mergeproof daily limit reached ($DAILY_LIMIT agent runs today); this issue was not started. Re-dispatch it tomorrow."
+            echo "stopped=true" >> "$GITHUB_OUTPUT"
             echo "Daily limit reached ($runs >= $DAILY_LIMIT); not starting the agent."
             exit 0
           fi
@@ -139,7 +142,11 @@ jobs:
       # The agent action's inputs used here (adjust here if its interface
       # changes): prompt, anthropic_api_key, github_token, claude_args.
       # Pin this to the commit SHA of the tag you audit before relying on it.
+      # success() is load-bearing: a bare if: would REPLACE the default
+      # success check, so a failed ctx step (empty stopped output) would
+      # still start the agent.
       - name: Run the coding agent on the issue
+        if: success() && steps.ctx.outputs.stopped != 'true'
         uses: anthropics/claude-code-action@v1 # pin the commit SHA you audit
         env:
           # init sets this to the Anthropic-compatible endpoint of the model
@@ -160,6 +167,7 @@ jobs:
           claude_args: "--model ${{ vars.MERGEPROOF_MODEL }}"
 
       - name: Find the agent's PR and post the dispatch marker
+        if: success() && steps.ctx.outputs.stopped != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
