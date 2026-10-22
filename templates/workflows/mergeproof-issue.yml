@@ -1,0 +1,193 @@
+# Mergeproof — issue to PR (flow 2).
+#
+# A trusted issue — opened by an allowlisted author, or labeled `agent` by a
+# collaborator who can write — starts the coding agent with the skill for the
+# issue's kind. The agent implements, self-checks and opens a PR; this workflow
+# then posts the dispatch-marker comment that mergeproof-pr reads back.
+# Retries arrive as workflow_dispatch from mergeproof-pr's apply job.
+#
+# `mergeproof init` installs this file together with the skills under
+# .mergeproof/skills/ and the `agent` and `needs-human` labels.
+
+name: mergeproof-issue
+
+on:
+  issues:
+    types: [opened, labeled]
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: 'Issue number the agent works on'
+        required: true
+      pr:
+        description: 'Pull request number on a retry (fix only what the gate named)'
+        required: false
+        default: ''
+      attempt:
+        description: 'Gate attempt for this run (1 = first)'
+        required: false
+        default: '1'
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+  actions: read
+
+jobs:
+  agent:
+    # Kill switch first. Prompt-injection guard: a Bot never starts a run;
+    # `opened` only for authors in the comma-separated MERGEPROOF_AUTHORS
+    # variable; `labeled` only for the `agent` label by a non-bot sender — the
+    # context step then checks the sender is a write/maintain/admin
+    # collaborator. A dispatch (a human, or the PR workflow's retry) always
+    # runs.
+    if: vars.MERGEPROOF_MODE != 'off' && (github.event_name == 'workflow_dispatch' || (github.event.issue.user.type != 'Bot' && ((github.event.action == 'opened' && contains(split(vars.MERGEPROOF_AUTHORS || ',', ','), github.event.issue.user.login)) || (github.event.action == 'labeled' && github.event.label.name == 'agent' && github.event.sender.type != 'Bot'))))
+    concurrency:
+      group: mergeproof-issue-${{ github.event.issue.number || github.event.inputs.issue }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    steps:
+      # Default branch only, no persisted credentials: the agent pushes with
+      # the bot token, never with GITHUB_TOKEN (whose pushes trigger nothing).
+      # Full history so the agent's `mergeproof check --local` can see the
+      # merge base.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Context — trust the start, cap the day, pick the kind
+        id: ctx
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_ACTION: ${{ github.event.action }}
+          SENDER: ${{ github.event.sender.login }}
+          ISSUE_NUMBER: ${{ github.event.issue.number || github.event.inputs.issue }}
+          PR_NUMBER: ${{ github.event.inputs.pr || '' }}
+          ATTEMPT: ${{ github.event.inputs.attempt || '1' }}
+          BUGFIX_LABELS: ${{ vars.MERGEPROOF_BUGFIX_LABELS || 'bug' }}
+          DAILY_LIMIT: ${{ vars.MERGEPROOF_DAILY_LIMIT || '10' }}
+        run: |
+          set -euo pipefail
+
+          # A label start counts only from a collaborator who can write.
+          if [ "$EVENT_NAME" = 'issues' ] && [ "$EVENT_ACTION" = 'labeled' ]; then
+            perm="$(gh api "repos/$REPO/collaborators/$SENDER/permission" --jq .permission)"
+            case "$perm" in
+              admin | maintain | write) ;;
+              *)
+                echo "::error::the agent label needs a collaborator with write, maintain or admin (sender $SENDER has $perm)"
+                exit 1
+                ;;
+            esac
+          fi
+
+          # Daily cap: count today's runs of this workflow (this one included).
+          today="$(date -u +%F)"
+          runs="$(gh run list --workflow mergeproof-issue.yml --created ">=$today" --json databaseId --jq 'length')"
+          if [ "$runs" -ge "$DAILY_LIMIT" ]; then
+            gh issue comment "$ISSUE_NUMBER" --repo "$REPO" \
+              --body "Mergeproof daily limit reached ($DAILY_LIMIT agent runs today); this issue was not started. Re-dispatch it tomorrow."
+            echo "Daily limit reached ($runs >= $DAILY_LIMIT); not starting the agent."
+            exit 0
+          fi
+
+          # Kind: an issue label from MERGEPROOF_BUGFIX_LABELS makes it a
+          # bugfix; everything else is a feature. Same proof, different trust
+          # bucket — and only maintainers label issues.
+          kind="feature"
+          labels_csv="$(gh issue view "$ISSUE_NUMBER" --repo "$REPO" --json labels --jq '[.labels[].name] | join(",")')"
+          if [ -n "$labels_csv" ]; then
+            IFS=',' read -ra label_list <<< "$labels_csv"
+            for label in "${label_list[@]}"; do
+              case ",$BUGFIX_LABELS," in *",$label,"*) kind="bugfix" ;; esac
+            done
+          fi
+
+          # Skill name and version come from the SKILL.md frontmatter init
+          # installed on the default branch — never from the issue or the PR.
+          skill_file=".mergeproof/skills/$kind/SKILL.md"
+          skill_name="$(sed -n 's/^name:[[:space:]]*//p' "$skill_file" | head -n 1)"
+          skill_version="$(sed -n 's/^version:[[:space:]]*//p' "$skill_file" | head -n 1)"
+          if [ -z "$skill_name" ] || [ -z "$skill_version" ]; then
+            echo "::error::$skill_file is missing its name/version frontmatter"
+            exit 1
+          fi
+          skill="$skill_name@$skill_version"
+
+          # On a retry, point the agent at the gate's latest verdict comment
+          # (github-actions[bot] authored); it must fix only what the notes name.
+          retry_note=""
+          if [ -n "$PR_NUMBER" ]; then
+            verdict_url="$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" \
+              --jq '[.[] | select(.user.login == "github-actions[bot]") | select(.body | contains("Mergeproof —"))][-1].html_url // empty' || true)"
+            retry_note="This is gate retry attempt $ATTEMPT for pull request #$PR_NUMBER. Fix ONLY what the gate's latest notes name — read the latest Mergeproof verdict comment by github-actions[bot]${verdict_url:+ at $verdict_url} — keep the existing commits and add one new commit with the right prefix. Do not reshuffle the rest of the diff."
+          fi
+
+          {
+            echo "issue-number=$ISSUE_NUMBER"
+            echo "kind=$kind"
+            echo "skill=$skill"
+            echo "pr-number=$PR_NUMBER"
+            echo "attempt=$ATTEMPT"
+            echo "retry-note=$retry_note"
+          } >> "$GITHUB_OUTPUT"
+
+      # The agent action's inputs used here (adjust here if its interface
+      # changes): prompt, anthropic_api_key, github_token, claude_args.
+      # Pin this to the commit SHA of the tag you audit before relying on it.
+      - name: Run the coding agent on the issue
+        uses: anthropics/claude-code-action@v1 # pin the commit SHA you audit
+        env:
+          # init sets this to the Anthropic-compatible endpoint of the model
+          # provider (https://api.z.ai/api/anthropic for GLM).
+          ANTHROPIC_BASE_URL: ${{ vars.MERGEPROOF_MODEL_BASE_URL }}
+        with:
+          anthropic_api_key: ${{ secrets.MERGEPROOF_MODEL_KEY }}
+          # The bot token, so the agent's pushes and its PR trigger CI.
+          github_token: ${{ secrets.MERGEPROOF_BOT_TOKEN }}
+          prompt: |
+            You are the mergeproof coding agent for this repository.
+
+            Follow the playbook at .mergeproof/skills/${{ steps.ctx.outputs.kind }}/SKILL.md exactly and implement issue #${{ steps.ctx.outputs.issue-number }}: read the issue and all of its comments, write the proof tests first, implement, run the repo's full test suite, run `npx @ahmed-3m/mergeproof check --local`, do the fresh-context critic pass the playbook describes, and open the pull request exactly as the playbook says.
+
+            ${{ steps.ctx.outputs.retry-note }}
+
+            When the playbook says to stop, comment your questions or findings on issue #${{ steps.ctx.outputs.issue-number }} and end the run. Never edit an existing test file, never touch .mergeproof.json, .mergeproof/ or .github/, and never add labels yourself.
+          claude_args: "--model ${{ vars.MERGEPROOF_MODEL }}"
+
+      - name: Find the agent's PR and post the dispatch marker
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ steps.ctx.outputs.issue-number }}
+          KIND: ${{ steps.ctx.outputs.kind }}
+          SKILL: ${{ steps.ctx.outputs.skill }}
+          BOT_LOGIN: ${{ vars.MERGEPROOF_BOT_LOGIN }}
+          PR_NUMBER: ${{ steps.ctx.outputs.pr-number }}
+        run: |
+          set -euo pipefail
+          if [ -n "$PR_NUMBER" ]; then
+            # Retry dispatch: the marker already exists; never post a second.
+            echo "Retry run for PR #$PR_NUMBER; the dispatch marker stays as it is."
+            exit 0
+          fi
+          # The playbook names branches agent/<kind>-<issue>-<slug>; find the
+          # PR on such a branch, authored by the bot login.
+          prefix="agent/$KIND-$ISSUE_NUMBER-"
+          pr="$(gh pr list --repo "$REPO" --state open --limit 100 --json number,headRefName,author \
+            --jq "[.[] | select(.author.login == \"$BOT_LOGIN\" and (.headRefName | startswith(\"$prefix\"))) | .number] | max // empty" || true)"
+          if [ -z "$pr" ]; then
+            gh issue comment "$ISSUE_NUMBER" --repo "$REPO" \
+              --body "Mergeproof: the agent finished without opening a pull request (check this run's logs). A human should take this issue over."
+            gh issue edit "$ISSUE_NUMBER" --repo "$REPO" --add-label needs-human
+            echo "::error::no open pull request found by $BOT_LOGIN on branches $prefix*"
+            exit 1
+          fi
+          # Posted with the default github.token so the author is
+          # github-actions[bot]; mergeproof-pr only trusts that author.
+          gh pr comment "$pr" --repo "$REPO" --body "<!-- mergeproof-dispatch issue=$ISSUE_NUMBER skill=$SKILL -->
+          Mergeproof dispatched the agent for issue #$ISSUE_NUMBER using $SKILL."

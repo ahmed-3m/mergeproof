@@ -1,0 +1,301 @@
+# Mergeproof — PR to outcome (flow 3).
+#
+# Runs when this repo's own CI completes on a pull request, gates the PR, and
+# lands the verdict. Two jobs, because PR code runs inside the gate's proof
+# worktrees: the gate job gets a read-only token and no secrets, and only the
+# apply job (which never runs PR code and never installs anything) can write.
+#
+# Triggered by workflow_run, never pull_request: a pull_request trigger would
+# run the PR's own edited copy of this file; workflow_run always runs the
+# default-branch definition. Editing .github/** is gate tampering anyway.
+#
+# `mergeproof init` fills in two placeholders before this file lands in the
+# customer repo:
+#   {{CI_WORKFLOW}}      name of the workflow whose completion gates a PR
+#   {{INSTALL_COMMAND}}  how this repo installs dependencies before tests
+
+name: mergeproof-pr
+
+on:
+  workflow_run:
+    workflows: ["{{CI_WORKFLOW}}"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: 'Pull request number to gate'
+        required: true
+
+# Nothing is granted at the top level; each job declares only what it needs.
+permissions: {}
+
+jobs:
+  context:
+    # Kill switch first. Then: never for CI runs that were not pull_request
+    # events, and never when the event carries no PR — fork PRs have none, and
+    # fork PRs go to HUMAN in the gate anyway. A dispatch always runs and takes
+    # the PR from its input.
+    if: vars.MERGEPROOF_MODE != 'off' && (github.event_name == 'workflow_dispatch' || (github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0] != null))
+    permissions:
+      pull-requests: read
+      issues: read
+    runs-on: ubuntu-latest
+    outputs:
+      pr-url: ${{ steps.ctx.outputs.pr-url }}
+      pr-number: ${{ steps.ctx.outputs.pr-number }}
+      head-sha: ${{ steps.ctx.outputs.head-sha }}
+      agent: ${{ steps.ctx.outputs.agent }}
+      model: ${{ steps.ctx.outputs.model }}
+      skill: ${{ steps.ctx.outputs.skill }}
+      issue: ${{ steps.ctx.outputs.issue }}
+      skill-args: ${{ steps.ctx.outputs.skill-args }}
+      issue-args: ${{ steps.ctx.outputs.issue-args }}
+      attempt: ${{ steps.ctx.outputs.attempt }}
+    steps:
+      - name: Resolve the PR, the dispatch marker and the attempt count
+        id: ctx
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          EVENT_PR_HEAD_SHA: ${{ github.event.workflow_run.pull_requests[0].head.sha }}
+          DISPATCH_PR: ${{ github.event.inputs.pr }}
+          AGENT: ${{ vars.MERGEPROOF_AGENT }}
+          MODEL: ${{ vars.MERGEPROOF_MODEL }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            number="$(gh pr view "$DISPATCH_PR" --repo "$REPO" --json number --jq .number)"
+            url="$(gh pr view "$DISPATCH_PR" --repo "$REPO" --json url --jq .url)"
+            head_sha="$(gh pr view "$DISPATCH_PR" --repo "$REPO" --json headRefOid --jq .headRefOid)"
+          else
+            number="$EVENT_PR_NUMBER"
+            head_sha="$EVENT_PR_HEAD_SHA"
+            url="https://github.com/$REPO/pull/$number"
+          fi
+
+          # Everything re-derived below comes from comments authored by
+          # github-actions[bot] only: the agent never gets to write its own
+          # dispatch marker or attempt count, and comments from every other
+          # author are ignored.
+          bodies="$(gh api --paginate "repos/$REPO/issues/$number/comments" \
+            --jq '.[] | select(.user.login == "github-actions[bot]") | .body' || true)"
+
+          # The dispatch marker the issue workflow posted:
+          #   <!-- mergeproof-dispatch issue=<n> skill=<name@version> -->
+          marker="$(grep '^<!-- mergeproof-dispatch' <<< "$bodies" | tail -n 1 || true)"
+          issue=""
+          skill=""
+          if [ -n "$marker" ]; then
+            issue="$(sed -n 's/.*issue=\([0-9][0-9]*\).*/\1/p' <<< "$marker" | tail -n 1)"
+            skill="$(sed -n 's/.*skill=\([^ ]*\).*/\1/p' <<< "$marker" | tail -n 1)"
+          fi
+
+          # attempt = 1 + the gate's prior RETRY verdict comments.
+          retries="$(grep -c 'Mergeproof — RETRY' <<< "$bodies" || true)"
+          attempt=$(( retries + 1 ))
+
+          issue_args=""
+          skill_args=""
+          if [ -n "$issue" ]; then issue_args="--issue $issue"; fi
+          if [ -n "$skill" ]; then skill_args="--skill $skill"; fi
+
+          {
+            echo "pr-url=$url"
+            echo "pr-number=$number"
+            echo "head-sha=$head_sha"
+            echo "agent=$AGENT"
+            echo "model=$MODEL"
+            echo "skill=$skill"
+            echo "issue=$issue"
+            echo "issue-args=$issue_args"
+            echo "skill-args=$skill_args"
+            echo "attempt=$attempt"
+          } >> "$GITHUB_OUTPUT"
+
+  gate:
+    # The read-only half of the split: runs PR code inside the proof, so it
+    # gets no secrets, no write permission and no persisted credentials.
+    needs: context
+    if: vars.MERGEPROOF_MODE != 'off' && needs.context.result == 'success'
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+      issues: read
+    concurrency:
+      # A newer CI run for the same PR replaces this gate.
+      group: mergeproof-pr-${{ needs.context.outputs.pr-number }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out the ledger branch (skip when it does not exist yet)
+        env:
+          LEDGER_BRANCH: mergeproof-ledger
+          LEDGER_DIR: .mergeproof-ledger
+        run: |
+          set -euo pipefail
+          # fetch-depth: 0 already fetched every branch, so this needs no
+          # network access and no credentials. A missing branch is fine: the
+          # gate reads the ledger through --ledger and treats it as empty.
+          if git show-ref --verify --quiet "refs/remotes/origin/$LEDGER_BRANCH"; then
+            git worktree add "$LEDGER_DIR" "origin/$LEDGER_BRANCH"
+          fi
+      - name: Install dependencies
+        run: "{{INSTALL_COMMAND}}"
+      - name: Gate — mergeproof check
+        id: gate
+        # Exit codes are the frozen verdict contract: 0 MERGE, 3 RETRY, 4
+        # HUMAN. 3 and 4 are verdicts, not failures; the step below fails the
+        # job only on 1/2 (error / usage).
+        continue-on-error: true
+        uses: ahmed-3m/mergeproof@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          command: check
+          args: >-
+            ${{ needs.context.outputs.pr-url }}
+            --verdict-out ${{ runner.temp }}/verdict.json
+            --agent ${{ needs.context.outputs.agent }}
+            --model ${{ needs.context.outputs.model }}
+            ${{ needs.context.outputs.skill-args }}
+            --attempt ${{ needs.context.outputs.attempt }}
+            ${{ needs.context.outputs.issue-args }}
+            --ledger .mergeproof-ledger/ledger.json
+      - name: Fail on the gate's own errors (exit 1 or 2)
+        if: steps.gate.outputs.exit-code != '0' && steps.gate.outputs.exit-code != '3' && steps.gate.outputs.exit-code != '4'
+        env:
+          CODE: ${{ steps.gate.outputs.exit-code }}
+        run: |
+          set -euo pipefail
+          echo "::error::mergeproof check failed (exit $CODE)"
+          exit 1
+      - name: Upload the verdict file for the apply job
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mergeproof-verdict
+          path: ${{ runner.temp }}/verdict.json
+          if-no-files-found: warn
+          retention-days: 1
+
+  apply:
+    # The write half: never runs PR code (no install step, only the repo's own
+    # default branch), and takes every fact except "the proof held" from the
+    # context outputs, never from the gate's artifact.
+    needs: [context, gate]
+    if: vars.MERGEPROOF_MODE != 'off' && needs.context.result == 'success' && needs.gate.result == 'success'
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      checks: read
+      actions: write # dispatching the agent retry (gh workflow run)
+    concurrency:
+      # The ledger branch is written here and by mergeproof-sync; never cancel
+      # mid-write.
+      group: mergeproof-ledger
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+      - name: Check out the ledger branch (or start it as an orphan)
+        env:
+          LEDGER_BRANCH: mergeproof-ledger
+          LEDGER_DIR: .mergeproof-ledger
+        run: |
+          set -euo pipefail
+          if git show-ref --verify --quiet "refs/remotes/origin/$LEDGER_BRANCH"; then
+            git worktree add "$LEDGER_DIR" "origin/$LEDGER_BRANCH"
+          else
+            # Fresh install: the branch does not exist yet. Start it empty.
+            git worktree add --detach "$LEDGER_DIR" HEAD
+            git -C "$LEDGER_DIR" checkout --orphan "$LEDGER_BRANCH"
+            git -C "$LEDGER_DIR" rm -r --quiet --ignore-unmatch . || true
+          fi
+      - name: Download the verdict file
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: mergeproof-verdict
+          path: ${{ runner.temp }}
+      - name: Land the verdict — mergeproof apply
+        id: apply
+        continue-on-error: true
+        uses: ahmed-3m/mergeproof@v1
+        env:
+          # The bot token merges, so the merge commit triggers the repo's push
+          # CI (events from the default GITHUB_TOKEN never do).
+          GH_TOKEN: ${{ secrets.MERGEPROOF_BOT_TOKEN }}
+        with:
+          command: apply
+          args: >-
+            ${{ runner.temp }}/verdict.json
+            --pr ${{ needs.context.outputs.pr-url }}
+            --agent ${{ needs.context.outputs.agent }}
+            --model ${{ needs.context.outputs.model }}
+            ${{ needs.context.outputs.skill-args }}
+            --attempt ${{ needs.context.outputs.attempt }}
+            ${{ needs.context.outputs.issue-args }}
+            --ledger .mergeproof-ledger/ledger.json
+      - name: Fail on apply's own errors (exit 1 or 2)
+        if: steps.apply.outputs.exit-code != '0' && steps.apply.outputs.exit-code != '3' && steps.apply.outputs.exit-code != '4'
+        env:
+          CODE: ${{ steps.apply.outputs.exit-code }}
+        run: |
+          set -euo pipefail
+          echo "::error::mergeproof apply failed (exit $CODE)"
+          exit 1
+      - name: Commit and push the ledger
+        env:
+          LEDGER_BRANCH: mergeproof-ledger
+          LEDGER_DIR: .mergeproof-ledger
+        run: |
+          set -euo pipefail
+          if [ -z "$(git -C "$LEDGER_DIR" status --porcelain)" ]; then
+            echo "Ledger unchanged; nothing to push."
+            exit 0
+          fi
+          git -C "$LEDGER_DIR" add -A
+          git -C "$LEDGER_DIR" -c user.name='github-actions[bot]' \
+            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -m 'chore: record mergeproof outcomes'
+          # One rebase-and-retry if another run won the race to push first.
+          if ! git -C "$LEDGER_DIR" push origin "HEAD:$LEDGER_BRANCH"; then
+            git -C "$LEDGER_DIR" fetch origin "$LEDGER_BRANCH"
+            git -C "$LEDGER_DIR" rebase "origin/$LEDGER_BRANCH"
+            git -C "$LEDGER_DIR" push origin "HEAD:$LEDGER_BRANCH"
+          fi
+      - name: RETRY with attempts left — dispatch the agent again
+        # exit 3 (RETRY): while attempts remain and a dispatch marker named an
+        # issue, the agent gets one more round on the same PR.
+        if: steps.apply.outputs.exit-code == '3' && fromJSON(needs.context.outputs.attempt) < 3 && needs.context.outputs.issue != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ needs.context.outputs.pr-number }}
+          ISSUE: ${{ needs.context.outputs.issue }}
+          NEXT_ATTEMPT: ${{ fromJSON(needs.context.outputs.attempt) + 1 }}
+        run: |
+          set -euo pipefail
+          gh workflow run mergeproof-issue.yml -f pr="$PR_NUMBER" -f issue="$ISSUE" -f attempt="$NEXT_ATTEMPT"
+      - name: RETRY exhausted — hand the PR to a human
+        # exit 3 (RETRY) with attempt >= 3, or a RETRY on a PR with no issue to
+        # re-dispatch: apply already commented the verdict; label and explain.
+        if: steps.apply.outputs.exit-code == '3' && (fromJSON(needs.context.outputs.attempt) >= 3 || needs.context.outputs.issue == '')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ needs.context.outputs.pr-url }}
+          ATTEMPT: ${{ needs.context.outputs.attempt }}
+        run: |
+          set -euo pipefail
+          gh pr edit "$PR_URL" --add-label needs-human
+          gh pr comment "$PR_URL" --body "Mergeproof: retries exhausted after attempt $ATTEMPT; a human needs to take this pull request over."
