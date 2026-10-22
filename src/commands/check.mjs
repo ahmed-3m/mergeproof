@@ -32,7 +32,10 @@ function linkNodeModules(root, dir) {
 // These paths are fingerprinted before and after the proof runs; any change
 // is tampering, and git is not called again.
 function guardedPaths(commonDir, ledgerPath) {
-  const paths = ['config', 'config.worktree', 'hooks', 'info'].map((p) => join(commonDir, p));
+  // refs/HEAD/packed-refs and alternates are the same class of shared-.git
+  // write: a planted ref or an alternates redirect changes what the gate's
+  // next git call reads.
+  const paths = ['config', 'config.worktree', 'hooks', 'info', 'refs', 'HEAD', 'packed-refs', 'objects/info/alternates'].map((p) => join(commonDir, p));
   return ledgerPath ? [...paths, ledgerPath] : paths;
 }
 
@@ -228,7 +231,8 @@ export async function runCheck(argv, deps = defaultDeps) {
           : config.mode;
   let merged = false;
   let text = `${formatVerdict(verdict)}\n  (${mode}${verdict.verdict === 'MERGE' ? (merged ? ': merged' : ': not merged') : ''})`;
-  if (pr && !readOnly) {
+  // Off means off: like apply's refusal, an off gate writes nothing to GitHub.
+  if (pr && !readOnly && config.mode !== 'off') {
     ({ merged, text } = land(
       {
         prUrl, pr, ledger, ledgerPath, config, verdict,
