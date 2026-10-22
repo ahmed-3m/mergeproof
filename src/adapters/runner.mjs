@@ -23,7 +23,14 @@ const SUITE = '(suite)';
 const DROP_ENV = /TOKEN|SECRET|PASSWORD|API_KEY|PRIVATE_KEY|^NODE_TEST_CONTEXT$/i;
 
 function cleanEnv() {
-  return Object.fromEntries(Object.entries(process.env).filter(([k]) => !DROP_ENV.test(k)));
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !DROP_ENV.test(k)));
+  // Ask runners for plain text: a colored summary would hide the case count
+  // from parseTestCount and silently skip the dropped-test-count check.
+  // FORCE_COLOR is set too because CI environments often set it, and it
+  // overrides NO_COLOR in several runners.
+  env.NO_COLOR = '1';
+  env.FORCE_COLOR = '0';
+  return env;
 }
 
 function run(cwd, command, extra, timeoutSec) {
@@ -54,7 +61,12 @@ const PYTEST_COUNTS = /(\d+) (passed|failed|errors?|skipped|xfailed|xpassed)\b/g
 
 /** Number of test cases in a runner's output, or null when no summary parses. */
 export function parseTestCount(output) {
-  const text = String(output ?? '');
+  // Strip ANSI escapes first (SGR colors, cursor moves, OSC): CI often forces
+  // color on, and a colored summary line would not match the ^-anchored
+  // formats below — the count would read as null and the drop check skip.
+  const text = String(output ?? '')
+    .replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')
+    .replace(/\x1b\][^\x07]*\x07/g, '');
   for (const format of COUNT_FORMATS) {
     format.lastIndex = 0;
     let last = null;

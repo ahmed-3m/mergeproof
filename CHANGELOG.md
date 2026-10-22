@@ -5,6 +5,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ## [Unreleased]
 
 ### Fixed
+- Colored test output no longer disables the dropped-test-count check: `parseTestCount` strips ANSI escapes (SGR, cursor, OSC) before matching, and proof runs set `NO_COLOR=1` with `FORCE_COLOR=0` (CI often forces color on, and FORCE_COLOR overrides NO_COLOR in several runners), so a refactor that makes test cases disappear cannot hide behind a colored summary.
 - Renaming a manifest away (`package-lock.json` → `old/package-lock.json`) classifies as `deps`, not `refactor`: classification now sees a rename's old path too, so a manifest cannot be walked out of the never-auto-merged bucket.
 - Trust can no longer be diluted by pending merges: the recent-revert window in `trustFor` now counts settled outcomes only, so a run of merges still inside their revert window cannot push a revert out of the window and restore an agent's trust before any of them settles (the documented "pending merges count toward neither" rule, now actually enforced).
 - The gate job authenticates its git fetches for private repos: `persist-credentials: false` (kept, so PR test code cannot steal checkout credentials) leaves git unauthenticated, and `check` fetches the PR and base refs over the network. A `gh auth setup-git` step with the job's read-only `github.token` now configures the credential helper before the gate runs; public repos are unaffected, and the test environment's `*TOKEN*` scrubbing keeps the token away from PR code.
