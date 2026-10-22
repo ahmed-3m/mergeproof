@@ -2,22 +2,25 @@ import { VERSION } from './version.mjs';
 import { EXIT_CODES } from './verdict.mjs';
 import { NotImplementedError, UsageError } from './errors.mjs';
 import { runCheck } from './commands/check.mjs';
+import { runApply } from './commands/apply.mjs';
 import { runSync } from './commands/sync.mjs';
 
-const COMMANDS = { check: runCheck, sync: runSync };
+const COMMANDS = { check: runCheck, apply: runApply, sync: runSync };
 
 export const USAGE = `mergeproof v${VERSION} — let AI agents merge, only with proof
 
 Usage:
   mergeproof check <pr-url> [--dry-run] [--json]   gate a pull request
   mergeproof check --local [--base <ref>] [--json] preflight HEAD against its base (agents run this)
+  mergeproof apply <verdict-file> --pr <pr-url> [--dry-run] [--json]  land a gate verdict (write job; runs no PR code)
   mergeproof sync [--dry-run] [--json]             settle the ledger and record reverts
   mergeproof --version | --help
 
 Options:
-  --agent <name> --model <name>   trust bucket (set by the workflow, never by the PR)
-  --skill <name> --attempt <n>    logged with the outcome
+  --agent <name> --model <name>   trust bucket (set by the workflow, never by the PR; apply requires both)
+  --skill <name> --attempt <n>    logged with the outcome; apply must get the gate job's values
   --issue <n>                     issue the agent was dispatched for; its bugfix label picks the bucket
+  --verdict-out <file>            check: write the verdict for an apply job, write nothing to GitHub
   --ledger <path>                 default .mergeproof/ledger.json
   --ref <ref>                     sync: branch whose history is scanned (default HEAD)
 

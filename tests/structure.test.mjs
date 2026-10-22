@@ -32,11 +32,16 @@ const CONTRACT = {
   'src/decide.mjs': ['decide'],
   'src/ledger.mjs': ['LEDGER_SCHEMA', 'DEFAULT_LEDGER', 'readLedger', 'writeLedger', 'appendOutcome', 'trustFor'],
   'src/trailer.mjs': ['TRAILER_KEY', 'formatTrailer', 'parseTrailer'],
+  'src/agents.mjs': ['notAnAgentPr'],
+  'src/inspect.mjs': ['inspect'],
+  'src/land.mjs': ['land'],
+  'src/verdictfile.mjs': ['VERDICT_FILE_SCHEMA', 'writeVerdictFile', 'readVerdictFile'],
   'src/commands/check.mjs': ['runCheck', 'evaluate'],
+  'src/commands/apply.mjs': ['runApply'],
   'src/commands/sync.mjs': ['runSync', 'settle'],
   'src/adapters/process.mjs': ['runProcess'],
   'src/adapters/git.mjs': ['changedFiles', 'changedPaths', 'diff', 'addedLines', 'addWorktree', 'removeWorktree', 'commonDir', 'log'],
-  'src/adapters/gh.mjs': ['getPullRequest', 'getChecksStatus', 'issueLabels', 'squashMerge', 'comment', 'createIssue'],
+  'src/adapters/gh.mjs': ['getPullRequest', 'getChecksStatus', 'issueLabels', 'squashMerge', 'comment', 'createIssue', 'addLabel'],
   'src/adapters/runner.mjs': ['runTests', 'parseTestCount'],
 };
 

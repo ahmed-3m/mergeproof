@@ -16,6 +16,8 @@ A workflow calls the gate on the agent's pull request; agents preflight locally 
 
 ```bash
 npx @ahmed-3m/mergeproof check https://github.com/you/repo/pull/42 --agent claude-code --model glm-5.2 --issue 17
+npx @ahmed-3m/mergeproof check <pr-url> --verdict-out verdict.json   # read-only gate job; a separate write job runs:
+npx @ahmed-3m/mergeproof apply verdict.json --pr <pr-url> --agent <name> --model <name>  # lands the verdict, labels needs-human on HUMAN
 npx @ahmed-3m/mergeproof check --local      # preflight, run by agents before opening a PR
 npx @ahmed-3m/mergeproof sync               # settle the ledger, record reverts
 ```

@@ -91,6 +91,11 @@ export function comment(prUrl, body) {
   gh(['pr', 'comment', prUrl, '--body', body]);
 }
 
+/** Label a PR, e.g. needs-human when apply lands a HUMAN verdict. */
+export function addLabel(prUrl, label) {
+  gh(['pr', 'edit', prUrl, '--add-label', label]);
+}
+
 export function createIssue({ repo, title, body, labels = [] }) {
   const args = ['issue', 'create', '--repo', repo, '--title', title, '--body', body];
   for (const l of labels) args.push('--label', l);

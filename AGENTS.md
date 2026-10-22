@@ -16,7 +16,7 @@
 ## Commands
 
 - Run tests: `npm test` (pins the suite list; don't run `node --test tests/` directly)
-- Run the CLI: `node bin/mergeproof.mjs <check|sync> [...]`
+- Run the CLI: `node bin/mergeproof.mjs <check|apply|sync> [...]`
 
 ## Layout
 
@@ -24,9 +24,10 @@
 |---|---|
 | `bin/mergeproof.mjs` | npm bin entry; loads `src/cli.mjs` |
 | `src/cli.mjs` | Command dispatch, usage, exit codes |
-| `src/commands/` | `check` and `sync` pipelines |
+| `src/commands/` | `check`, `apply` and `sync` pipelines |
 | `src/config.mjs`, `src/glob.mjs` | `.mergeproof.json` defaults, validation and path globs |
 | `src/classify.mjs` → `tamper.mjs` → `prove.mjs` → `decide.mjs` | The gate pipeline, in order |
+| `src/agents.mjs`, `src/inspect.mjs`, `src/land.mjs`, `src/verdictfile.mjs` | Agent-PR identity, paths → kind + tamper notes (both shared with `apply`), landing a verdict (record, merge, ledger, comment), and the `mergeproof-verdict@1` gate → apply handoff |
 | `src/ledger.mjs`, `src/trailer.mjs` | Trust ledger and `Mergeproof-Verdict` merge trailer |
 | `src/adapters/` | `process` (child processes), `git` (diffs, worktrees), `gh`, test `runner` |
 | `tests/structure.test.mjs` | Repo invariants and per-module export contracts |

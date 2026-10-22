@@ -17,7 +17,7 @@
     "mergeproof": "bin/mergeproof.mjs"
   },
   "scripts": {
-    "test": "node --test tests/cli.test.mjs tests/verdict.test.mjs tests/args.test.mjs tests/structure.test.mjs tests/config.test.mjs tests/glob.test.mjs tests/pipeline.test.mjs tests/runner.test.mjs tests/ledger.test.mjs tests/commands.test.mjs tests/benchmarks.test.mjs tests/demo.test.mjs",
+    "test": "node --test tests/cli.test.mjs tests/verdict.test.mjs tests/args.test.mjs tests/structure.test.mjs tests/config.test.mjs tests/glob.test.mjs tests/pipeline.test.mjs tests/runner.test.mjs tests/ledger.test.mjs tests/commands.test.mjs tests/apply.test.mjs tests/benchmarks.test.mjs tests/demo.test.mjs",
     "demo": "node demo/build.mjs"
   },
   "files": [
