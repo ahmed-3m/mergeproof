@@ -1,0 +1,41 @@
+{
+  "name": "@ahmed-3m/mergeproof",
+  "version": "0.0.0",
+  "description": "Let AI agents merge, only with proof. A zero-dependency trust gate for AI-agent pull requests.",
+  "type": "module",
+  "license": "MIT",
+  "author": "ahmed-3m",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ahmed-3m/mergeproof.git"
+  },
+  "homepage": "https://github.com/ahmed-3m/mergeproof#readme",
+  "bugs": {
+    "url": "https://github.com/ahmed-3m/mergeproof/issues"
+  },
+  "bin": {
+    "mergeproof": "bin/mergeproof.mjs"
+  },
+  "scripts": {
+    "test": "node --test tests/cli.test.mjs tests/verdict.test.mjs tests/args.test.mjs tests/structure.test.mjs tests/config.test.mjs tests/glob.test.mjs tests/pipeline.test.mjs tests/ledger.test.mjs tests/commands.test.mjs tests/benchmarks.test.mjs"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "README.md",
+    "LICENSE",
+    "SECURITY.md"
+  ],
+  "keywords": [
+    "ai-agents",
+    "coding-agent",
+    "pull-request",
+    "merge-gate",
+    "code-review",
+    "github-actions",
+    "cli"
+  ],
+  "engines": {
+    "node": ">=18.17"
+  }
+}

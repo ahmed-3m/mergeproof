@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [18, 22, 24]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Tests
+        run: npm test
+
+  package-smoke:
+    # A missing entry in package.json "files" breaks `npx @ahmed-3m/mergeproof`
+    # without breaking any in-repo test, so the packed tarball gets its own check.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: Pack the tarball
+        id: pack
+        run: echo "tarball=$(npm pack --pack-destination "$RUNNER_TEMP" | tail -n 1)" >> "$GITHUB_OUTPUT"
+      - name: Install and run the packed binary
+        run: |
+          mkdir -p "$RUNNER_TEMP/smoke" && cd "$RUNNER_TEMP/smoke"
+          npm install "$RUNNER_TEMP/${{ steps.pack.outputs.tarball }}"
+          BIN="node_modules/@ahmed-3m/mergeproof/bin/mergeproof.mjs"
+          test "$(node "$BIN" --version)" = "$(node -p "require('$GITHUB_WORKSPACE/package.json').version")"
+          node "$BIN" --help
