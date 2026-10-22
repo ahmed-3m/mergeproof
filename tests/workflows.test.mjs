@@ -232,7 +232,8 @@ test('issue workflow: daily cap and dispatch marker', () => {
 });
 
 test('issue workflow: the daily cap stops the agent step, and so does a failed context step', () => {
-  const issue = TEMPLATES['mergeproof-issue.yml'];
+  // Normalize line endings: Windows checkouts may carry CRLF.
+  const issue = TEMPLATES['mergeproof-issue.yml'].replace(/\r\n/g, '\n');
   // exit 0 in the ctx step only ends that step; the later steps must guard on
   // its stopped output. success() is load-bearing: a bare if: would REPLACE
   // the default success check, letting a failed ctx step start the agent.
