@@ -5,6 +5,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ## [Unreleased]
 
 ### Added
+- M2 skills: `skills/bugfix/SKILL.md` and `skills/feature/SKILL.md` — per-kind playbooks (proof-first test, the tamper rules, `check --local`, a fresh-context critic pass, a self-review PR body) that skill-aware harnesses load and other harnesses read as prompt instructions. `skills/README.md` documents usage; the workflow logs them to the ledger as `--skill <name>@<version>`, and the structure suite validates the frontmatter.
 - Refactor proof now runs the full suite on head as well (green on base and head, per flow 2) and compares test-case counts, parsed from node:test (spec/TAP), jest, vitest and pytest output: fewer cases on head than base is the `testCountDropped` tamper rule, so a refactor can no longer make tests disappear by deleting the data they generate from. Counts that don't parse are skipped, so unknown runners keep working.
 - M1 gate: `check <pr-url>` and `check --local` run classify → tamper → prove → decide. Per-kind proof runs in throwaway git worktrees: new test files must fail on base 2/2 and pass on head 3/3. Enforce mode merges pinned to the proven head with a `Mergeproof-Verdict` trailer. Every proven PR is logged to `.mergeproof/ledger.json`, so human merges earn trust too.
 - `sync` settles the ledger (open → pending → clean or reverted) and opens a human-triage issue for each revert.
