@@ -123,6 +123,9 @@ export async function runCheck(argv, deps = defaultDeps) {
   if (flags.local && positionals.length > 0) {
     throw new UsageError('use either <pr-url> or --local, not both');
   }
+  if (flags.local && flags.issue !== null) {
+    throw new UsageError('--issue only applies to a pull request, not --local');
+  }
   if (!flags.local && positionals.length !== 1) {
     throw new UsageError('expected exactly one <pr-url>, or --local');
   }

@@ -16,6 +16,9 @@ All notable changes to this project are documented here. The format follows [Kee
 - Specs: `PROTOTYPE.md` (M1 core CLI) and `briefs/m2-autopilot.md` (M2 package).
 - Tests for the CLI, verdict formatting, flag parsing and repo invariants; CI on Node 18/22/24 for Linux and Windows.
 
+### Changed
+- `check --local --issue` is now a usage error.
+
 ### Security
 - Test runs drop credential-like environment variables and `NODE_TEST_CONTEXT` (an inherited value made a nested `node --test` exit 0 on failure).
 - An agent PR now needs an author in `agents.logins`; a branch named `agent/...` alone no longer qualifies, and fork PRs always go to a human.

@@ -209,6 +209,10 @@ test('a test run that writes to the shared .git/config is caught before the gate
   }
 });
 
+test('--local with --issue is a usage error: the issue belongs to a PR run', async () => {
+  await assert.rejects(runCheck(['--local', '--issue', '3']), /--issue only applies to a pull request, not --local/);
+});
+
 test('check --local runs end to end through the CLI', () => {
   const { repo } = setup();
   try {
