@@ -4,8 +4,9 @@ import { NotImplementedError, UsageError } from './errors.mjs';
 import { runCheck } from './commands/check.mjs';
 import { runApply } from './commands/apply.mjs';
 import { runSync } from './commands/sync.mjs';
+import { runInit } from './commands/init.mjs';
 
-const COMMANDS = { check: runCheck, apply: runApply, sync: runSync };
+const COMMANDS = { check: runCheck, apply: runApply, sync: runSync, init: runInit };
 
 export const USAGE = `mergeproof v${VERSION} — let AI agents merge, only with proof
 
@@ -14,6 +15,10 @@ Usage:
   mergeproof check --local [--base <ref>] [--json] preflight HEAD against its base (agents run this)
   mergeproof apply <verdict-file> --pr <pr-url> [--dry-run] [--json]  land a gate verdict (write job; runs no PR code)
   mergeproof sync [--dry-run] [--json]             settle the ledger and record reverts
+  mergeproof init [--dry-run] [--yes] [--force] [--json]
+                  [--agent <name>] [--model <name>] [--base-url <url>] [--bot-login <login>]
+                  [--ci-workflow <name>] [--install-command <cmd>] [--test-command <cmd>]
+                                                  install mergeproof into this repo (M2)
   mergeproof --version | --help
 
 Options:
@@ -24,6 +29,12 @@ Options:
   --verdict-out <file>            check: write the verdict for an apply job, write nothing to GitHub
   --ledger <path>                 default .mergeproof/ledger.json
   --ref <ref>                     sync: branch whose history is scanned (default HEAD)
+  --bot-login <login>             init: login of the machine user whose token opens agent PRs (required)
+  --base-url <url>                init: Anthropic-compatible endpoint (defaulted for glm-* models)
+  --ci-workflow <name>            init: workflow whose PR CI the gate waits for (auto-detected)
+  --install-command <cmd>         init: dependency install the gate job runs (auto-detected from the lockfile)
+  --test-command <cmd>            init: test command for proof runs (auto-detected from scripts.test)
+  --yes                           init: apply the remote changes without asking
 
 Exit codes: 0 MERGE, 3 RETRY, 4 HUMAN, 2 usage error, 1 other error`;
 

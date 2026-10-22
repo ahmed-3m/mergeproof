@@ -9,9 +9,19 @@ const PR_FIELDS = [
   'labels', 'commits', 'isCrossRepository', 'mergeCommit', 'mergedAt', 'statusCheckRollup',
 ].join(',');
 
-function gh(args) {
-  const res = runProcess('gh', args);
-  if (res.code !== 0) throw new Error(`gh ${args.slice(0, 2).join(' ')} failed: ${(res.stderr || res.stdout).trim().split('\n')[0]}`);
+/** Replace every occurrence of `secret` with ***: a gh error message must never echo a secret back. */
+export function redactSecret(text, secret) {
+  return secret ? text.split(secret).join('***') : text;
+}
+
+function gh(args, { input } = {}) {
+  const res = runProcess('gh', args, { input });
+  if (res.code !== 0) {
+    let first = (res.stderr || res.stdout).trim().split('\n')[0];
+    // Only secrets are passed as input; their value must never reach a message.
+    if (input !== undefined) first = redactSecret(first, input);
+    throw new Error(`gh ${args.slice(0, 2).join(' ')} failed: ${first}`);
+  }
   return res.stdout;
 }
 
@@ -100,4 +110,46 @@ export function createIssue({ repo, title, body, labels = [] }) {
   const args = ['issue', 'create', '--repo', repo, '--title', title, '--body', body];
   for (const l of labels) args.push('--label', l);
   return gh(args).trim();
+}
+
+// ---- `mergeproof init` support (M2). Read paths used by detection and the
+// post-install verification; write paths are idempotent by construction.
+
+/** owner/repo and the default branch of the repo the current login sees. */
+export function repoView() {
+  const raw = JSON.parse(gh(['repo', 'view', '--json', 'nameWithOwner,defaultBranchRef']));
+  return { repo: raw.nameWithOwner, defaultBranch: raw.defaultBranchRef?.name ?? null };
+}
+
+/** Create a label, or update an existing one (--force), with a fixed colour and description. */
+export function createLabel({ repo, name, color, description }) {
+  gh(['label', 'create', name, '--repo', repo, '--color', color, '--description', description, '--force']);
+}
+
+/** Create or overwrite a repository variable. */
+export function setVariable({ repo, name, value }) {
+  gh(['variable', 'set', name, '--body', value, '--repo', repo]);
+}
+
+/**
+ * Create or overwrite a repository secret. The value travels on the child's
+ * stdin (`runProcess` `input`), never in argv, and is redacted from any error
+ * message gh produces.
+ */
+export function setSecret({ repo, name, value }) {
+  gh(['secret', 'set', name, '--repo', repo], { input: value });
+}
+
+/** GET `path` through `gh api`; null on 404 when allowed, an Error otherwise. */
+export function apiJson(path, { allow404 = false } = {}) {
+  const res = runProcess('gh', ['api', path]);
+  if (res.code === 0) return JSON.parse(res.stdout);
+  const first = (res.stderr || res.stdout).trim().split('\n')[0];
+  if (allow404 && /HTTP 404/.test(first)) return null;
+  throw new Error(`gh api failed: ${first}`);
+}
+
+/** Does the branch exist? A 404 means no; anything else throws. */
+export function branchExists({ repo, branch }) {
+  return apiJson(`repos/${repo}/branches/${encodeURIComponent(branch)}`, { allow404: true }) !== null;
 }

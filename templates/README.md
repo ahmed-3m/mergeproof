@@ -21,8 +21,10 @@ The three templates `mergeproof init` copies into a customer's
 > *Run workflow* dialog); nothing is lost, the dropped run wrote nothing.
 
 `mergeproof init` fills in the placeholders and creates the `agent` and
-`needs-human` labels and the `mergeproof-ledger` branch. Every job of every
-workflow checks the `MERGEPROOF_MODE != 'off'` kill switch first; shadow vs
+`needs-human` labels. It never creates the `mergeproof-ledger` branch: the PR
+workflow starts it as an orphan on its first write, so a fresh install simply
+does not have one yet. Every job of every workflow checks the
+`MERGEPROOF_MODE != 'off'` kill switch first; shadow vs
 enforce lives in `.mergeproof.json`, not in this variable.
 
 ## Placeholders (filled by `mergeproof init`)
