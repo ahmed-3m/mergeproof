@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync } from 'node:fs';
+import { copyFileSync, mkdirSync, rmSync } from 'node:fs';
 import { createRepo, testFile, FIXED_MATH, BASE_FILES } from './fixtures/repo.mjs';
 import { runCheck, evaluate, defaultDeps as checkDeps } from '../src/commands/check.mjs';
 import { runSync, settle, defaultDeps as syncDeps } from '../src/commands/sync.mjs';
@@ -54,7 +54,18 @@ function setup(config = {}) {
 function deps(repo, gh, out) {
   return {
     ...checkDeps,
-    git: { ...checkDeps.git, fetch: () => {} },
+    git: {
+      ...checkDeps.git,
+      // The fixture has no origin: fake the fetch by pointing the requested
+      // refs at the local branches they stand for.
+      fetch: (root, refspecs) => {
+        const local = { 'refs/mergeproof/base': 'main', 'refs/mergeproof/head': 'agent/fix' };
+        for (const rs of refspecs) {
+          const dst = rs.replace(/^\+/, '').split(':')[1];
+          repo.git(['update-ref', dst, repo.git(['rev-parse', local[dst]])]);
+        }
+      },
+    },
     gh,
     cwd: () => repo.dir,
     now: () => new Date('2026-10-22T12:00:00Z'),
@@ -345,6 +356,63 @@ test('sync writes the settled ledger and opens a human-triage issue', async () =
     assert.equal(issues[0].repo, 'acme/app');
     assert.match(issues[0].body, /not meant for an agent/);
     assert.match(out[0], /1 newly reverted/);
+  } finally {
+    repo.cleanup();
+  }
+});
+
+test('renaming a manifest away is still a dependency change', async () => {
+  // package-lock.json → old/package-lock.json must not escape the deps bucket
+  // by classifying only its destination path.
+  const { repo, baseSha, ledger } = setup({ mode: 'enforce' });
+  try {
+    repo.git(['checkout', '--quiet', 'agent/fix']);
+    rmSync(ledger); // the fixture's commit() adds -A; keep the ledger out of the branch
+    repo.git(['mv', 'package.json', 'old-package.json']);
+    const headSha = repo.commit('chore: move the manifest');
+    repo.git(['checkout', '--quiet', 'main']);
+    copyFileSync(DEMO, ledger);
+    const gh = fakeGh(repo, { baseSha, headSha, headRef: 'agent/fix' });
+    const out = [];
+    assert.equal(await runCheck([URL, ...PR_ARGS], deps(repo, gh, out)), 4, out.join('\n'));
+    assert.match(out[0], /HUMAN \(kind: deps\)/, 'the rename classifies as deps, never refactor');
+    assert.equal(gh.calls.merge.length, 0);
+    assert.equal(readLedger(ledger).outcomes.length, 20, 'deps PRs are never logged as proven');
+  } finally {
+    repo.cleanup();
+  }
+});
+
+test('a failed triage issue leaves the ledger pending for the next sync', async () => {
+  const repo = createRepo();
+  try {
+    const ledgerPath = join(repo.dir, '.mergeproof', 'ledger.json');
+    const mergedSha = repo.git(['rev-parse', 'HEAD']);
+    repo.git(['revert', '--no-edit', 'HEAD']);
+    writeLedger(ledgerPath, { ...emptyLedger(), outcomes: [{ ...base, pr: 7, status: 'pending', mergedAt: new Date().toISOString(), mergeCommit: mergedSha }] });
+    await assert.rejects(
+      runSync([], {
+        ...syncDeps,
+        gh: { getPullRequest: () => assert.fail('no open PRs to look up'), createIssue: () => { throw new Error('rate limited'); } },
+        cwd: () => repo.dir,
+        print: () => {},
+      }),
+      /rate limited/,
+    );
+    assert.equal(readLedger(ledgerPath).outcomes[0].status, 'pending', 'the ledger on disk is untouched, so the next sync retries the issue');
+  } finally {
+    repo.cleanup();
+  }
+});
+
+test('mode off writes nothing to GitHub, like apply', async () => {
+  const { repo, baseSha, headSha } = setup({ mode: 'off' });
+  try {
+    const gh = fakeGh(repo, { baseSha, headSha });
+    const out = [];
+    assert.equal(await runCheck([URL, ...PR_ARGS], deps(repo, gh, out)), 4, out.join('\n'));
+    assert.match(out[0], /mergeproof is off/);
+    assert.deepEqual([gh.calls.merge.length, gh.calls.comment.length], [0, 0], 'an off gate comments nothing either');
   } finally {
     repo.cleanup();
   }

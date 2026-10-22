@@ -15,9 +15,9 @@ function gh(args) {
   return res.stdout;
 }
 
-/** owner/repo and number from https://github.com/owner/repo/pull/N */
+/** owner/repo and number from https://github.com/owner/repo/pull/N (+ any /files, ?query or #fragment a browser adds) */
 export function parsePrUrl(prUrl) {
-  const m = /^https:\/\/([^/]+)\/([^/]+)\/([^/]+)\/pull\/(\d+)\/?$/.exec(prUrl);
+  const m = /^https:\/\/([^/]+)\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:[/?#].*)?$/.exec(prUrl);
   if (!m) return null;
   return { host: m[1], repo: `${m[2]}/${m[3]}`, number: Number(m[4]) };
 }

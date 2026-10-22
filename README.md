@@ -34,6 +34,10 @@ Configure it with an optional `.mergeproof.json` in the repo root (read from the
 
 Exit codes: `0` MERGE, `3` RETRY, `4` HUMAN, `2` usage error, `1` other error.
 
+## GitHub Actions
+
+This repo's [`action.yml`](action.yml) is the reusable `ahmed-3m/mergeproof@v1` composite action (`check` | `apply` | `sync`), and [`templates/workflows/`](templates/README.md) ships the three workflow templates — issue to agent PR, PR to gate + apply, nightly ledger sync. `mergeproof init` (M2) copies them into your repo and fills their placeholders; the placeholders, repo variables and secrets are documented in [`templates/README.md`](templates/README.md), and every job's permissions in [SECURITY.md](SECURITY.md#workflow-permissions).
+
 ## Roadmap
 
 | Milestone | Scope | Spec |

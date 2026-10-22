@@ -25,12 +25,13 @@ export const HUMAN_LABEL = 'needs-human';
 // is re-derived here, because the file is written in the job that ran PR code
 // and every field in it is attacker-controlled.
 export async function runApply(argv, deps = defaultDeps) {
-  const { positionals, flags } = parseFlags(argv, ['dry-run', 'json'], ['pr', 'ledger', 'agent', 'model', 'skill', 'attempt', 'issue']);
+  const { positionals, flags } = parseFlags(argv, ['dry-run', 'json'], ['pr', 'ledger', 'agent', 'model', 'skill', 'attempt', 'issue', 'head']);
   if (positionals.length !== 1) throw new UsageError('expected exactly one <verdict-file>');
   // The PR comes from the workflow (the event that triggered it), never from the
   // file: a file naming another PR would borrow this PR's proof for that one.
   const prUrl = flags.pr;
   if (!prUrl || !gh.parsePrUrl(prUrl)) throw new UsageError('apply requires --pr <pr-url> (the pull request the gate job checked)');
+  if (flags.head !== null && !/^[0-9a-f]{40}$/.test(flags.head)) throw new UsageError('--head must be a 40-character commit sha');
   const agent = flags.agent;
   const model = flags.model;
   if (!agent || !model) throw new UsageError('apply requires --agent and --model (the same values the gate job got)');
@@ -66,6 +67,12 @@ export async function runApply(argv, deps = defaultDeps) {
   if (Object.keys(fromFlags).some((k) => fromFile[k] !== fromFlags[k])) {
     return suspect("verdict file does not match the workflow's flags");
   }
+  // The workflow pins the head its event's CI completed and passes the same
+  // --head to both jobs; a file naming a different head was not written by
+  // this workflow's gate.
+  if (flags.head !== null && flags.head !== verdict.headSha) {
+    return suspect("verdict file does not match the workflow's flags");
+  }
 
   const root = deps.git.topLevel(deps.cwd());
   const ledgerPath = resolve(root, flags.ledger ?? DEFAULT_LEDGER);
@@ -90,7 +97,10 @@ export async function runApply(argv, deps = defaultDeps) {
 
   deps.git.fetch(root, [`+refs/heads/${pr.baseRef}:refs/mergeproof/base`, `+refs/pull/${pr.number}/head:refs/mergeproof/head`]);
   if (deps.git.revParse(root, 'refs/mergeproof/head') !== verdict.headSha) return refuse('PR changed after the gate ran');
-  const config = parseConfig(deps.git.showFile(root, pr.baseSha, CONFIG_FILE), `${CONFIG_FILE} (base ${pr.baseSha.slice(0, 7)})`);
+  // The fetched base tip, the same single snapshot check gated against — never
+  // the API's base SHA, which can lag the fetch.
+  const baseTip = deps.git.revParse(root, 'refs/mergeproof/base');
+  const config = parseConfig(deps.git.showFile(root, baseTip, CONFIG_FILE), `${CONFIG_FILE} (base ${baseTip.slice(0, 7)})`);
 
   const notAgent = notAnAgentPr(pr, config);
   if (notAgent) return refuse(notAgent);
@@ -98,7 +108,7 @@ export async function runApply(argv, deps = defaultDeps) {
 
   // Re-derive kind and the path tamper rules with git only (the same inspect()
   // the gate uses, so the two cannot drift).
-  const baseSha = deps.git.mergeBase(root, pr.baseSha, verdict.headSha);
+  const baseSha = deps.git.mergeBase(root, baseTip, verdict.headSha);
   const claims = { title: pr.title, labels: pr.labels, subjects: pr.subjects };
   const issueLabels = issue ? deps.gh.issueLabels(prUrl, [issue]) : [];
   const { kind, tamperNotes } = inspect({ root, baseSha, headSha: verdict.headSha, config, claims, issueLabels }, deps);

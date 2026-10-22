@@ -46,3 +46,11 @@ test('parseTestCount returns null for output it cannot parse', () => {
   assert.equal(parseTestCount(null), null);
   assert.equal(parseTestCount('testing 123 tests ran fine'), null);
 });
+
+test('parseTestCount reads ANSI-colored summaries (CI often forces color)', () => {
+  const csi = (s) => `\x1b[32m${s}\x1b[39m`;
+  assert.equal(parseTestCount(csi('ℹ tests 2')), 2, 'colored node:test spec line');
+  assert.equal(parseTestCount(`\x1b[1mTests:\x1b[0m       4 passed, 1 failed, \x1b[31m5 total\x1b[0m`), 5, 'colored jest line');
+  assert.equal(parseTestCount(`\x1b[2K\x1b[1G\x1b[90m Tests \x1b[39m \x1b[32m4 passed\x1b[39m \x1b[90m(6)\x1b[39m`), 6, 'colored vitest line with cursor controls');
+  assert.equal(parseTestCount('\x1b]0;title\x07ℹ tests 3'), 3, 'an OSC title sequence before the summary');
+});

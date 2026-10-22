@@ -24,3 +24,10 @@ test('a value flag without a value is a usage error', () => {
   assert.throws(() => parseFlags(['--base', '--json'], ['json'], ['base']), UsageError);
   assert.throws(() => parseFlags(['--json=1'], ['json']), UsageError);
 });
+
+test('-- ends flag parsing; the rest is positional', () => {
+  const { positionals, flags } = parseFlags(['--json', '--', 'url', '--dry-run'], ['json', 'dry-run']);
+  assert.deepEqual(positionals, ['url', '--dry-run']);
+  assert.equal(flags.json, true);
+  assert.equal(flags['dry-run'], false);
+});

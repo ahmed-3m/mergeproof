@@ -88,7 +88,10 @@ export function trustFor(ledger, { kind, agent, model }, trustConfig) {
   const settled = merged.filter((o) => o.status !== 'pending');
   const clean = settled.filter((o) => o.status === 'clean').length;
   const cleanRate = settled.length ? clean / settled.length : 0;
-  const recentRevert = merged.slice(-trustConfig.minOutcomes).some((o) => o.status === 'reverted');
+  // Settled only: pending merges count toward neither (their revert window has
+  // not passed), so a run of not-yet-settled merges cannot push a revert out
+  // of the recent window and restore trust early.
+  const recentRevert = settled.slice(-trustConfig.minOutcomes).some((o) => o.status === 'reverted');
   const who = `${kind} for ${agent}/${model}`;
   const pct = `${Math.round(cleanRate * 100)}% clean`;
   let text;

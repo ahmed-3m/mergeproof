@@ -431,3 +431,53 @@ test('cli: apply with no file is a usage error', () => {
   assert.equal(res.status, 2);
   assert.match(res.stderr, /expected exactly one <verdict-file>/);
 });
+
+test('a pinned head that moved stands down, and apply supersedes the stale run with nothing written', async () => {
+  const { repo, baseSha, headSha, ledger } = setup({ mode: 'enforce' });
+  try {
+    // The event's CI completed on baseSha; the live PR head is headSha. The
+    // gate must not judge a commit its CI never covered.
+    const gh = fakeGh(gateOpts(baseSha, headSha));
+    const out = [];
+    const file = join(repo.dir, 'verdict.json');
+    assert.equal(await runCheck([URL, ...PR_ARGS, '--head', baseSha, '--verdict-out', file], deps(repo, gh, out)), 4, out.join('\n'));
+    assert.match(out[0], /superseded: the PR changed after its CI completed/);
+    assert.deepEqual([gh.calls.merge.length, gh.calls.comment.length, gh.calls.label.length], [0, 0, 0], 'the stale gate run writes nothing');
+    assert.equal(readLedger(ledger).outcomes.length, 20, 'no ledger write');
+    const v = readVerdictFile(file); // passes the strict validation apply will run
+    assert.equal(v.headSha, baseSha, "the file names the CI'd commit");
+    assert.equal(v.proven, false);
+    assert.equal(v.verdict, 'HUMAN');
+    // The workflow passes the same --head to apply; the live head differs, so
+    // the refusal is benign — print only, no label, no comment, no merge.
+    const out2 = [];
+    assert.equal(await runApply([file, '--pr', URL, '--head', baseSha, ...AGENT, '--issue', '3'], deps(repo, gh, out2)), 4, out2.join('\n'));
+    assert.deepEqual([gh.calls.merge.length, gh.calls.comment.length, gh.calls.label.length], [0, 0, 0], 'the stale apply writes nothing');
+    assert.match(out2[0], /PR changed after the gate ran[\s\S]*nothing written/);
+  } finally {
+    repo.cleanup();
+  }
+});
+
+test("apply refuses a file whose head disagrees with the workflow's --head", async () => {
+  const { repo, baseSha, headSha } = setup({ mode: 'enforce' });
+  try {
+    const gh = fakeGh(gateOpts(baseSha, headSha));
+    const file = writeVerdict(repo.dir, (d) => {
+      d.headSha = 'b'.repeat(40);
+    });
+    const out = [];
+    assert.equal(await runApply([file, '--pr', URL, '--head', 'a'.repeat(40), ...AGENT, '--issue', '3'], deps(repo, gh, out)), 4);
+    assert.equal(gh.calls.comment.length, 1, 'a flags mismatch is suspicious: commented');
+    assert.equal(gh.calls.label.length, 1, 'and labeled needs-human');
+    assert.equal(gh.calls.merge.length, 0);
+    assert.match(out[0], /gate output did not survive the re-check/);
+  } finally {
+    repo.cleanup();
+  }
+});
+
+test('--head with --local is a usage error', async () => {
+  await assert.rejects(runCheck(['--local', '--head', 'a'.repeat(40)]), /--head only applies to a pull request/);
+  await assert.rejects(runCheck([URL, '--head', 'not-a-sha']), /--head must be a 40-character commit sha/);
+});

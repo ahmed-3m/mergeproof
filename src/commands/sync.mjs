@@ -82,7 +82,11 @@ export async function runSync(argv, deps = defaultDeps) {
 
   const issues = [];
   if (!flags['dry-run']) {
-    writeLedger(ledgerPath, ledger);
+    // Issues first, ledger second: a failed createIssue must leave the outcome
+    // `pending` on disk so the next sync retries it. The reverse order would
+    // settle it silently and the triage issue would never exist; a failed
+    // write after a successful issue at worst opens a duplicate, which is
+    // visible and stops once a write lands.
     for (const o of newlyReverted) {
       const repo = gh.parsePrUrl(o.url ?? '')?.repo;
       if (!repo) continue;
@@ -99,6 +103,7 @@ export async function runSync(argv, deps = defaultDeps) {
         }),
       );
     }
+    writeLedger(ledgerPath, ledger);
   }
 
   const count = (s) => ledger.outcomes.filter((o) => o.status === s).length;

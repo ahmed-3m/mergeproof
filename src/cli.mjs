@@ -20,6 +20,7 @@ Options:
   --agent <name> --model <name>   trust bucket (set by the workflow, never by the PR; apply requires both)
   --skill <name> --attempt <n>    logged with the outcome; apply must get the gate job's values
   --issue <n>                     issue the agent was dispatched for; its bugfix label picks the bucket
+  --head <sha>                    check/apply: the head whose CI completed; a PR that moved since stands down for its own new run
   --verdict-out <file>            check: write the verdict for an apply job, write nothing to GitHub
   --ledger <path>                 default .mergeproof/ledger.json
   --ref <ref>                     sync: branch whose history is scanned (default HEAD)

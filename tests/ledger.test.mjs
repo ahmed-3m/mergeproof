@@ -32,6 +32,15 @@ test('pending merges do not count yet, and other buckets never count', () => {
   assert.equal(trustFor(ledgerOf(Array(10).fill('clean')), { ...key, kind: 'feature' }, TRUST).trusted, false);
 });
 
+test('pending merges cannot mask a revert (trust dilution)', () => {
+  // 10 clean, 1 reverted, then 10 merges still inside their revert window:
+  // the pending run must not push the revert out of the recent-settled window
+  // and hand trust back before any of the new merges settles.
+  const t = trustFor(ledgerOf([...Array(10).fill('clean'), 'reverted', ...Array(10).fill('pending')]), key, TRUST);
+  assert.equal(t.trusted, false);
+  assert.match(t.text, /lost trust/);
+});
+
 test('any revert in the last 10 merges drops trust', () => {
   const t = trustFor(ledgerOf([...Array(20).fill('clean'), 'reverted']), key, TRUST);
   assert.equal(t.trusted, false);
