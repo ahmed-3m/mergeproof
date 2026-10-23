@@ -4,9 +4,6 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
-### Security
-- `main-guard` workflow (this repo): every push to `main` is checked; a force-push, a commit outside any merged PR, or a PR merged without green GitHub Actions checks on its head fails the job and opens an issue. A detective control, because free private repos cannot have branch protection.
-
 ## [0.1.0] - 2026-10-23
 
 ### Fixed
@@ -23,9 +20,11 @@ All notable changes to this project are documented here. The format follows [Kee
 - `check` and `apply` now read the gate config and the merge-base from the fetched `refs/mergeproof/base` tip — one coherent snapshot — instead of the PR API's base SHA, which can lag the fetch and make the two jobs derive from different commits.
 - The PR workflow's bot-comment fetch fails closed: a swallowed `gh api` failure (the old `|| true`) read as zero comments, resetting the attempt count to 1 and dropping the dispatch marker — re-dispatching an agent that had already been told to retry. The marker and count greps keep their `|| true`, because grep exits 1 on zero matches and zero is a valid answer.
 - The release workflow creates the GitHub Release only when it is missing: `gh release create … || echo "already exists"` also swallowed real failures (auth, API) at a point where the `v1` tag had already moved, hiding a broken release.
+- The release workflow skips `npm publish` with a warning when `NPM_TOKEN` is not set, so the `v1` tag and the GitHub Release still land; re-run the tag after adding the secret to publish.
 
 ### Security
 - The issue workflow's daily cap now stops the run for real: hitting the cap used to `exit 0` inside the context step, which only ends that step — the agent step still ran, with the model key, on empty outputs. The context step now emits a `stopped` output, and the agent and marker steps require `success() && steps.ctx.outputs.stopped != 'true'` (`success()` is load-bearing: a bare `if:` replaces the default success check, so a *failed* context step would otherwise still start the agent). The run count uses `--limit 200` and fails closed at a full page, so the cap can no longer be under-counted past the default page size.
+- `main-guard` workflow (this repo): every push to `main` is checked; a force-push, a commit outside any merged PR, or a PR merged without green GitHub Actions checks on its head fails the job and opens an issue. A detective control, because free private repos cannot have branch protection.
 
 ### Added
 - `mergeproof init` (M2 flow 1): detects the install command, test command, test paths and PR CI workflow; writes `.mergeproof.json` (always `mode: shadow`), the three workflows with placeholders filled and the bugfix/feature skills; idempotent, `--force` to replace drifted files, `--dry-run` to only plan.

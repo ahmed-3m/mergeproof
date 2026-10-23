@@ -31,6 +31,13 @@ jobs:
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
+          # No NPM_TOKEN: the maintainer has not opted into publishing (the
+          # repo may still be private). The v1 tag and the Release still land;
+          # re-run this tag after adding the secret to publish.
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "::warning::NPM_TOKEN is not set; skipping npm publish for $version"
+            exit 0
+          fi
           if npm publish --access public --provenance; then :;
           else
             echo "::warning::provenance publish failed; retrying without it"
