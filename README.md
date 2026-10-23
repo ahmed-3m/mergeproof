@@ -1,6 +1,15 @@
-# mergeproof
+<p align="center">
+  <img src="./assets/readme/hero.svg" width="100%" alt="mergeproof — a trust gate for AI-agent pull requests with the verdicts MERGE, RETRY and HUMAN, next to a real gate run that refuses a bugfix PR for editing an existing test">
+</p>
 
-**Let AI agents merge, only with proof.**
+<p align="center">
+  <a href="https://github.com/ahmed-3m/mergeproof/actions/workflows/ci.yml"><img src="https://github.com/ahmed-3m/mergeproof/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://www.npmjs.com/package/@ahmed-3m/mergeproof"><img src="https://img.shields.io/npm/v/@ahmed-3m/mergeproof" alt="npm"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/node-%E2%89%A5%2018.17-339933" alt="Node 18.17 or newer">
+  <img src="https://img.shields.io/badge/dependencies-0-3fb950" alt="zero dependencies">
+  <img src="https://img.shields.io/badge/gate-LLM--free-58a6ff" alt="the gate never calls an LLM">
+</p>
 
 > Status: v0.1.0 — the M1 gate (`check`, `check --local`, `sync`), the check/apply CI split, and the reusable GitHub Action with workflow templates. Verified against the [pre-registered scenarios](benchmarks/specs.md). `mergeproof init` wires a repo in one command — see [Install](#install).
 
@@ -9,6 +18,18 @@ Coding agents (Copilot, Codex, OpenHands, Claude Code, GLM through Claude Code) 
 1. **Inspect.** Flags test tampering: edited or deleted tests, new skip markers, edits to the gate config or workflows, labels that disagree with the changed paths, oversized diffs.
 2. **Prove.** Requires proof that fits the task kind. Feature and bugfix PRs need new tests that fail on base and pass on head. Refactor PRs must leave tests untouched and pass on both. Docs and deps PRs must stay within their paths.
 3. **Decide and learn.** Returns `MERGE`, `RETRY` or `HUMAN`. Autonomy is earned per task kind and per agent from a ledger of past outcomes, and lost on a revert.
+
+<p align="center">
+  <img src="./assets/readme/pipeline.svg" width="100%" alt="The gate pipeline: classify (the kind comes from the changed paths), tamper (test tampering ends the run), prove (proof runs in fresh worktrees), decide (the trust ledger picks the verdict — MERGE, RETRY or HUMAN; settled outcomes feed back and earn autonomy)">
+</p>
+
+| Verdict | Meaning | Exit code |
+|---|---|---|
+| `MERGE` | proof held and the kind is trusted — merged in `enforce` mode, reported in `shadow` | `0` |
+| `RETRY` | proof was weak (e.g. the new test already passes on base) — the agent gets another attempt | `3` |
+| `HUMAN` | tampering, an untrusted kind, or impossible proof — a human takes over | `4` |
+
+Usage errors exit `2`, other errors `1`.
 
 ## Usage
 
@@ -31,8 +52,6 @@ Mergeproof — HUMAN (kind: bugfix)
 ```
 
 Configure it with an optional `.mergeproof.json` in the repo root (read from the base branch, never the PR); see [docs/architecture.md](docs/architecture.md#config-mergeproofjson). New installs run in `shadow` mode: verdicts are reported, nothing is merged.
-
-Exit codes: `0` MERGE, `3` RETRY, `4` HUMAN, `2` usage error, `1` other error.
 
 ## Install
 

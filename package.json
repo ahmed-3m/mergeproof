@@ -29,6 +29,7 @@
     "src/",
     "skills/",
     "templates/",
+    "assets/readme/",
     "README.md",
     "LICENSE",
     "SECURITY.md"

@@ -4,12 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
-### Added
-- `mergeproof init` (M2 flow 1): detects the install command, test command, test paths and PR CI workflow; writes `.mergeproof.json` (always `mode: shadow`), the three workflows with placeholders filled and the bugfix/feature skills; idempotent, `--force` to replace drifted files, `--dry-run` to only plan.
-- With `--yes` (or an interactive `y`) it creates the `agent`/`needs-human` labels, sets the agent/model/bot-login variables and stores `MERGEPROOF_MODEL_KEY`/`MERGEPROOF_BOT_TOKEN` from the environment over `gh secret set` stdin, redacted from any error. A read-only check reports branch protection, merge restrictions (incl. the github-actions app), the bot permission and token guidance; it never changes protection.
-
-### Fixed
-- `check --head` stands down without reading the CI'd commit: after a force-push that commit may be gone, so the superseded verdict carries no kind instead of crashing in the diff.
+### Security
+- `main-guard` workflow (this repo): every push to `main` is checked; a force-push, a commit outside any merged PR, or a PR merged without green GitHub Actions checks on its head fails the job and opens an issue. A detective control, because free private repos cannot have branch protection.
 
 ## [0.1.0] - 2026-10-23
 
@@ -32,6 +28,9 @@ All notable changes to this project are documented here. The format follows [Kee
 - The issue workflow's daily cap now stops the run for real: hitting the cap used to `exit 0` inside the context step, which only ends that step — the agent step still ran, with the model key, on empty outputs. The context step now emits a `stopped` output, and the agent and marker steps require `success() && steps.ctx.outputs.stopped != 'true'` (`success()` is load-bearing: a bare `if:` replaces the default success check, so a *failed* context step would otherwise still start the agent). The run count uses `--limit 200` and fails closed at a full page, so the cap can no longer be under-counted past the default page size.
 
 ### Added
+- `mergeproof init` (M2 flow 1): detects the install command, test command, test paths and PR CI workflow; writes `.mergeproof.json` (always `mode: shadow`), the three workflows with placeholders filled and the bugfix/feature skills; idempotent, `--force` to replace drifted files, `--dry-run` to only plan.
+- With `--yes` (or an interactive `y`) `init` creates the `agent`/`needs-human` labels, sets the agent/model/bot-login variables and stores `MERGEPROOF_MODEL_KEY`/`MERGEPROOF_BOT_TOKEN` from the environment over `gh secret set` stdin, redacted from any error. A read-only check reports branch protection, merge restrictions (incl. the github-actions app), the bot permission and token guidance; it never changes protection.
+- README: hero and pipeline visuals (`assets/readme/`, shipped in the npm tarball), badges and a verdict/exit-code table.
 - M2 GitHub Action and workflow templates: `action.yml` (`ahmed-3m/mergeproof@v1`) validates its `command`, runs `bin/mergeproof.mjs` with `args` passed through the environment and split without shell expansion, and exposes the CLI's exit code as an output. `templates/workflows/` ships `mergeproof-pr.yml` (workflow_run → context → read-only gate job → write-only apply job, ledger pushed to the `mergeproof-ledger` branch, agent re-dispatch on RETRY, `needs-human` when retries run out), `mergeproof-issue.yml` (allowlisted authors or maintainer `agent` labels start the agent with the per-kind skill; posts the `github-actions[bot]` dispatch marker) and `mergeproof-sync.yml` (nightly ledger settle). `templates/README.md` documents the placeholders, repo variables and secrets; the new workflows suite (`tests/workflows.test.mjs`) checks the templates' safety invariants — kill switch on every job, `set -euo pipefail`, no user text interpolated into any `run:` script — one-line runs included — SHA-pinned actions, read-only gate.
 - M2 skills: `skills/bugfix/SKILL.md` and `skills/feature/SKILL.md` — per-kind playbooks (proof-first test, the tamper rules, `check --local`, a fresh-context critic pass, a self-review PR body) that skill-aware harnesses load and other harnesses read as prompt instructions. `skills/README.md` documents usage; the workflow logs them to the ledger as `--skill <name>@<version>`, and the structure suite validates the frontmatter.
 - Split the gate for CI (M2): `check <pr-url> --verdict-out <file>` runs the gate with no writes at all — no merge, no comment, no ledger write — and writes a `mergeproof-verdict@1` JSON file for a separate write job. `--verdict-out` with `--local` is a usage error.
