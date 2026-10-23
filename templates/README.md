@@ -46,13 +46,40 @@ enforce lives in `.mergeproof.json`, not in this variable.
 | `MERGEPROOF_BUGFIX_LABELS` | `bug` | Maintainer | Comma-separated issue labels that make the run a bugfix; every other issue is a feature. |
 | `MERGEPROOF_DAILY_LIMIT` | `10` | Maintainer | Maximum runs of `mergeproof-issue.yml` per UTC day, this run included. Over the cap: a comment on the issue and a clean stop. |
 | `MERGEPROOF_BOT_LOGIN` | none | `mergeproof init` | Login of the bot user whose token opens agent PRs; the issue workflow looks for its PRs on `agent/<kind>-<issue>-*` branches. |
+| `MERGEPROOF_HARNESS` | `claude` | Maintainer | Which coding agent the issue workflow runs: `claude` (`anthropics/claude-code-action`) or `agy` (the Antigravity CLI, headless). `agy` also needs `MERGEPROOF_AGENT=agy`, so its PRs land in their own trust bucket; any other value stops the run. Read the agy notes below before switching. |
+| `MERGEPROOF_AGY_URL` | the pinned 1.4.6 tarball | Maintainer | Release tarball the agy harness downloads. Change it only together with `MERGEPROOF_AGY_SHA512`. |
+| `MERGEPROOF_AGY_SHA512` | the pinned 1.4.6 hash | Maintainer | SHA-512 the download must match, or the step fails before anything runs. |
 
 ## Secrets (Settings → Secrets and variables → Actions → Secrets)
 
 | Secret | Who sets it | Meaning |
 |---|---|---|
-| `MERGEPROOF_MODEL_KEY` | `mergeproof init` | API key for the model provider (passed as the agent action's `anthropic_api_key`). |
+| `MERGEPROOF_MODEL_KEY` | `mergeproof init` | API key for the model provider (passed as the agent action's `anthropic_api_key`; with `MERGEPROOF_HARNESS=agy`, a Gemini API key passed to agy as `GEMINI_API_KEY`). |
 | `MERGEPROOF_BOT_TOKEN` | `mergeproof init` | PAT of the bot user that the agent pushes and opens PRs with, so they trigger CI. Make it a fine-grained PAT for this one repository with `contents: write` and `pull-requests: write` only. The apply job never sees it: it lands with the job's `github.token`, whose comments are `github-actions[bot]`-authored (the attempt count and the agent's retry prompt read only those) and whose merges branch protection already allows — the accepted trade-off is that a mergeproof merge does not itself trigger the repo's push workflows (the gate pinned the merged head's CI instead). |
 
 The gate job sees no secret at all; see [SECURITY.md](../SECURITY.md) for the
 full per-job permission table.
+
+## The agy harness (`MERGEPROOF_HARNESS=agy`)
+
+Set `MERGEPROOF_HARNESS=agy`, `MERGEPROOF_AGENT=agy`, `MERGEPROOF_MODEL` to an
+agy model label, and `MERGEPROOF_MODEL_KEY` to a Gemini API key. The issue
+workflow then installs agy and runs `agy -p` with the same prompt and the same
+trusted issue file as the claude harness. Two things are weaker than on the
+claude path, and the template says so next to the steps:
+
+- **Supply chain.** Google's documented installer (`curl … install.sh | bash`)
+  installs whatever release is newest and checks it against a hash served by
+  the same host, so it proves only that the download was not corrupted. The
+  template never runs it: it downloads one release tarball and fails unless
+  its SHA-512 matches the pin. Upgrading is your call: read the release's
+  manifest, download the tarball, check its hash yourself, then set
+  `MERGEPROOF_AGY_URL` and `MERGEPROOF_AGY_SHA512` together.
+- **No tool deny-list.** Headless agy runs with
+  `--dangerously-skip-permissions` and has no equivalent of `claude_args`'
+  disallowed tools, so the prompt's ban on fetching issues, PRs and web pages
+  is not backed by anything. The trusted issue file is the only
+  prompt-injection control on this path.
+
+`AGY_CLI_DISABLE_AUTO_UPDATE=1` is set so the pinned binary does not replace
+itself mid-run (taken from the binary's strings; agy does not document it).

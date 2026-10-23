@@ -368,7 +368,7 @@ test('issue workflow: the daily cap stops the agent step, and so does a failed c
   // its stopped output. success() is load-bearing: a bare if: would REPLACE
   // the default success check, letting a failed ctx step start the agent.
   assert.match(issue, /echo "stopped=true" >> "\$GITHUB_OUTPUT"/);
-  const guarded = [...issue.matchAll(/^ {6}- name: ([^\n]+)\n {8}if: success\(\) && steps\.ctx\.outputs\.stopped != 'true'\n/gm)].map((m) => m[1]);
+  const guarded = [...issue.matchAll(/^ {6}- name: ([^\n]+)\n {8}if: success\(\) && steps\.ctx\.outputs\.stopped != 'true'(?: && steps\.ctx\.outputs\.harness == '(?:claude|agy)')?\n/gm)].map((m) => m[1]);
   assert.ok(
     guarded.some((n) => n.includes('coding agent')),
     'the agent step must be guarded by success() && stopped != true',
@@ -615,6 +615,98 @@ gh() {
     }
     s.check(res);
   }
+});
+
+// The issue workflow's steps as { name, text } (the text runs to the next step).
+function issueSteps() {
+  const issue = TEMPLATES['mergeproof-issue.yml'].replace(/\r\n/g, '\n');
+  return issue.split(/\n(?= {6}- )/).map((text) => ({ name: / {6}- (?:name: )?(.*)/.exec(text)?.[1] ?? '', text }));
+}
+
+test('issue workflow: MERGEPROOF_HARNESS picks exactly one agent step, and agy needs its own bucket', () => {
+  const issue = TEMPLATES['mergeproof-issue.yml'].replace(/\r\n/g, '\n');
+  assert.match(issue, /HARNESS: \$\{\{ vars\.MERGEPROOF_HARNESS \|\| 'claude' \}\}/, 'claude stays the default');
+  const ctx = runBlocks(issue).find((b) => b.includes('agent issue file: begin'));
+  // An unknown harness and an agy run under another agent's bucket both stop.
+  assert.match(ctx, /case "\$HARNESS" in\n\s+claude\) ;;\n\s+agy\)\n\s+if \[ "\$AGENT" != 'agy' \]; then/);
+  assert.match(ctx, /MERGEPROOF_HARNESS must be claude or agy/);
+  assert.match(ctx, /echo "harness=\$HARNESS"/);
+  const steps = issueSteps();
+  const claude = steps.find((s) => s.name === 'Run the coding agent on the issue');
+  const install = steps.find((s) => s.name === 'Install the pinned agy binary');
+  const agy = steps.find((s) => s.name === 'Run the coding agent on the issue (agy)');
+  assert.ok(claude && install && agy, 'the claude step, the agy install step and the agy run step');
+  assert.match(claude.text, /steps\.ctx\.outputs\.harness == 'claude'/);
+  for (const s of [install, agy]) assert.match(s.text, /if: success\(\) && steps\.ctx\.outputs\.stopped != 'true' && steps\.ctx\.outputs\.harness == 'agy'/);
+});
+
+test('issue workflow: agy is installed from a pinned SHA-512, never through install.sh', () => {
+  const issue = TEMPLATES['mergeproof-issue.yml'].replace(/\r\n/g, '\n');
+  const install = issueSteps().find((s) => s.name === 'Install the pinned agy binary');
+  // The documented installer installs "latest" and checks it against a hash
+  // from the same server; the template names that risk and does not use it.
+  assert.match(issue, /SUPPLY-CHAIN RISK/);
+  const run = runBlocks(install.text)[0];
+  assert.doesNotMatch(run, /install\.sh|\|\s*(ba)?sh\b/, 'no curl | bash');
+  assert.doesNotMatch(run, /\$\{\{/, 'everything reaches the script through env');
+  assert.match(install.text, /AGY_URL: \$\{\{ vars\.MERGEPROOF_AGY_URL \|\| 'https:\/\/storage\.googleapis\.com\/[^']+\.tar\.gz' \}\}/);
+  assert.match(install.text, /AGY_SHA512: \$\{\{ vars\.MERGEPROOF_AGY_SHA512 \|\| '[0-9a-f]{128}' \}\}/);
+});
+
+test('issue workflow: the agy install step refuses a download that does not match the pin (real bash, fake curl)', (t) => {
+  const run = runBlocks(issueSteps().find((s) => s.name === 'Install the pinned agy binary').text)[0];
+  const dir = mkdtempSync(join(tmpdir(), 'mp-agy-install-')).replace(/\\/g, '/');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  // GNU tar reads `C:/...` as a remote host, so bash gets the MSYS form.
+  const b = dir.replace(/^([A-Za-z]):/, (_, d) => `/${d.toLowerCase()}`);
+  // A fixture release: a tarball holding one `antigravity` executable. curl
+  // is a function that "downloads" it to the -o path (the second-last arg).
+  const setup = [
+    'set -euo pipefail',
+    `mkdir -p "${b}/src" && printf '#!/bin/sh\\necho agy-fixture\\n' > "${b}/src/antigravity" && chmod +x "${b}/src/antigravity"`,
+    `tar -czf "${b}/release.tar.gz" -C "${b}/src" antigravity`,
+    `curl() { cp "${b}/release.tar.gz" "\${@: -2:1}"; }`,
+  ].join('\n');
+  const scriptPath = join(dir, 'install.sh');
+  const runWith = (sha) => {
+    rmSync(join(dir, 'tmp'), { recursive: true, force: true });
+    writeFileSync(scriptPath, `${setup}\n${sha === 'real' ? `AGY_SHA512="$(sha512sum "${b}/release.tar.gz" | cut -d' ' -f1)"` : `AGY_SHA512=${sha}`}\n${run.replace(/\r/g, '')}\n`);
+    return runProcess('bash', [scriptPath], {
+      env: { ...process.env, AGY_URL: 'https://example.invalid/agy.tar.gz', RUNNER_TEMP: `${b}/tmp`, GITHUB_PATH: `${b}/github_path` },
+    });
+  };
+  let res;
+  try {
+    res = runWith('0'.repeat(128));
+  } catch {
+    t.skip('bash is not available');
+    return;
+  }
+  assert.equal(res.code, 1, res.stdout + res.stderr);
+  assert.match(res.stdout, /::error::the agy download does not match the pinned SHA-512/);
+  assert.ok(!existsSync(join(dir, 'tmp', 'agy', 'agy')), 'a mismatched download is never installed');
+  res = runWith('real');
+  assert.equal(res.code, 0, res.stdout + res.stderr);
+  assert.match(res.stdout, /agy-fixture/, 'the pinned binary is installed and runs');
+  assert.match(readFileSync(join(dir, 'github_path'), 'utf8'), /\/tmp\/agy/);
+});
+
+test('issue workflow: the agy step runs the same prompt headless, with secrets in env only', () => {
+  const issue = TEMPLATES['mergeproof-issue.yml'].replace(/\r\n/g, '\n');
+  const agy = issueSteps().find((s) => s.name === 'Run the coding agent on the issue (agy)');
+  // The two harnesses must not drift: the agy prompt is the claude prompt.
+  const claudePrompt = / {10}prompt: \|\n([\s\S]*?)\n(?: {10}# | {10}claude_args:)/.exec(issue)?.[1];
+  const agyPrompt = / {10}AGENT_PROMPT: \|\n([\s\S]*?)\n {8}run: \|/.exec(agy.text)?.[1];
+  assert.ok(claudePrompt && agyPrompt);
+  assert.equal(agyPrompt, claudePrompt);
+  const run = runBlocks(agy.text)[0];
+  assert.doesNotMatch(run, /\$\{\{/, 'no expression inside run: (script injection)');
+  assert.match(run, /agy -p "\$AGENT_PROMPT" --model "\$MODEL" --dangerously-skip-permissions --output-format text/);
+  assert.match(run, /\[ "\$code" -eq 3 \] \|\| grep -q 'AGY_ERROR'/, 'model errors (exit 3 / AGY_ERROR) fail the step with a hint');
+  assert.match(agy.text, /GEMINI_API_KEY: \$\{\{ secrets\.MERGEPROOF_MODEL_KEY \}\}/);
+  assert.match(agy.text, /GH_TOKEN: \$\{\{ secrets\.MERGEPROOF_BOT_TOKEN \}\}/);
+  assert.match(agy.text, /GIT_CONFIG_VALUE_1: '!gh auth git-credential'/);
+  assert.match(agy.text, /AGY_CLI_DISABLE_AUTO_UPDATE: '1'/);
 });
 
 test('sync workflow: nightly, on the shared ledger concurrency group', () => {
