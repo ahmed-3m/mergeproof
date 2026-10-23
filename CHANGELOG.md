@@ -4,6 +4,9 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Fixed
+- The release workflow sets a git identity before creating the annotated `v1` tag (the v0.1.0 run failed there), and `main-guard` gets `checks: read` so it can see CI results.
+
 ## [0.1.0] - 2026-10-23
 
 ### Fixed
