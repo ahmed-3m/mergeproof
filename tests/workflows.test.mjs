@@ -197,6 +197,16 @@ test('pr workflow: top-level permissions are empty and each job declares its own
   assert.match(PR_JOBS.context, /issues: read/);
 });
 
+test('pr workflow: jobs that read the CI rollup can read commit statuses too', () => {
+  // gh's statusCheckRollup mixes check runs and commit statuses; without
+  // statuses: read GitHub refuses the whole query as soon as any other app
+  // (a review bot, say) has posted a status.
+  for (const job of ['gate', 'apply']) {
+    assert.match(PR_JOBS[job], /checks: read/, `${job} reads CI checks`);
+    assert.match(PR_JOBS[job], /statuses: read/, `${job} needs statuses: read`);
+  }
+});
+
 test('pr workflow: triggered by workflow_run, never by pull_request', () => {
   const pr = TEMPLATES['mergeproof-pr.yml'];
   assert.match(pr, /^ {2}workflow_run:/m);
