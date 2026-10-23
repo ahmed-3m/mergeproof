@@ -306,9 +306,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ needs.context.outputs.pr-number }}
           ISSUE: ${{ needs.context.outputs.issue }}
-          NEXT_ATTEMPT: ${{ fromJSON(needs.context.outputs.attempt) + 1 }}
+          ATTEMPT: ${{ needs.context.outputs.attempt }}
         run: |
           set -euo pipefail
+          # Expressions have no arithmetic; count in the shell (attempt is digits only).
+          [[ "$ATTEMPT" =~ ^[0-9]+$ ]] || { echo "::error::bad attempt count"; exit 1; }
+          NEXT_ATTEMPT=$(( ATTEMPT + 1 ))
           gh workflow run mergeproof-issue.yml -f pr="$PR_NUMBER" -f issue="$ISSUE" -f attempt="$NEXT_ATTEMPT"
       - name: RETRY exhausted — hand the PR to a human
         # exit 3 (RETRY) with attempt >= 3, or a RETRY on a PR with no issue to

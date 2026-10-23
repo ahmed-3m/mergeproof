@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { runProcess } from '../src/adapters/process.mjs';
 
 const ACTION = readFileSync(resolve('action.yml'), 'utf8');
 const TEMPLATE_DIR = resolve('templates/workflows');
@@ -108,8 +109,31 @@ test('action.yml passes args through the environment and runs the repo binary', 
   }
   const run = runBlocks(ACTION).find((b) => b.includes('bin/mergeproof.mjs'));
   assert.ok(run, 'action.yml must run bin/mergeproof.mjs');
-  assert.match(run, /read -ra|set --/, 'args must be split without shell expansion');
+  assert.match(run, /read -r -d '' -a argv/, 'args must be split without shell expansion');
   assert.match(run, /GITHUB_ACTION_PATH/);
+});
+
+test('action.yml really splits args into separate words in bash', (t) => {
+  // The v0.1.0 action wrote `read -ra -d '' argv`: -a took `-d` as the array
+  // name, every gate run got no arguments and died with a usage error. Run
+  // the real script with the node call swapped for a printer.
+  const run = runBlocks(ACTION).find((b) => b.includes('bin/mergeproof.mjs'));
+  const script = run
+    .split(/\r?\n/)
+    .filter((l) => !l.includes('GITHUB_OUTPUT') && !/^\s*exit /.test(l))
+    .map((l) => (l.includes('bin/mergeproof.mjs') ? 'printf "<%s>\n" "$MERGEPROOF_COMMAND" "${argv[@]}"' : l))
+    .join('\n');
+  let res;
+  try {
+    res = runProcess('bash', ['-c', script], {
+      env: { ...process.env, MERGEPROOF_COMMAND: 'check', MERGEPROOF_ARGS: 'https://x/pull/1 --head abc  --agent a*b\n--attempt 2' },
+    });
+  } catch {
+    t.skip('bash is not available');
+    return;
+  }
+  assert.equal(res.code, 0, res.stderr);
+  assert.equal(res.stdout.replace(/\r/g, ''), '<check>\n<https://x/pull/1>\n<--head>\n<abc>\n<--agent>\n<a*b>\n<--attempt>\n<2>\n');
 });
 
 for (const [file, text] of Object.entries(TEMPLATES)) {
@@ -143,6 +167,18 @@ for (const [file, text] of Object.entries(TEMPLATES)) {
       for (const [, fn] of expr.replace(/'[^']*'/g, "''").matchAll(/([A-Za-z_][\w]*)\s*\(/g)) {
         assert.ok(known.has(fn), `${file}: ${fn}() is not a GitHub Actions expression function`);
       }
+    }
+  });
+
+  test(`${file}: expressions use no arithmetic`, () => {
+    // GitHub expressions have no + - * / operators: one anywhere makes GitHub
+    // reject the whole file, so the workflow silently never runs. Do the math
+    // in the run: script instead.
+    const exprs = [...text.matchAll(/\$\{\{([\s\S]*?)\}\}/g)].map((m) => m[1]);
+    exprs.push(...[...text.matchAll(/^\s*if:\s*(.+)$/gm)].map((m) => m[1]));
+    for (const expr of exprs) {
+      const bare = expr.replace(/'[^']*'/g, "''");
+      assert.doesNotMatch(bare, /[\w)\]]\s*[+*/]\s*[\w(]|\s-\s/, `${file}: arithmetic in expression: ${expr.trim()}`);
     }
   });
 
