@@ -220,9 +220,11 @@ jobs:
       statuses: read
       actions: write # dispatching the agent retry (gh workflow run)
     concurrency:
-      # The ledger branch is written here and by mergeproof-sync; never cancel
-      # mid-write.
-      group: mergeproof-ledger
+      # One apply per PR, never cancelled mid-write. Not one group for all PRs:
+      # GitHub keeps a single pending job per group and cancels the rest, so a
+      # burst of verdicts would silently drop all but the first and the last.
+      # Applies for different PRs race on the ledger push instead (see below).
+      group: mergeproof-apply-${{ needs.context.outputs.pr-number }}
       cancel-in-progress: false
     runs-on: ubuntu-latest
     steps:
@@ -291,16 +293,41 @@ jobs:
             echo "Ledger unchanged; nothing to push."
             exit 0
           fi
-          git -C "$LEDGER_DIR" add -A
-          git -C "$LEDGER_DIR" -c user.name='github-actions[bot]' \
-            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
-            commit -m 'chore: record mergeproof outcomes'
-          # One rebase-and-retry if another run won the race to push first.
-          if ! git -C "$LEDGER_DIR" push origin "HEAD:$LEDGER_BRANCH"; then
+          # Applies for other PRs (and sync) push to the same branch. When one
+          # wins the race, record this run's new outcomes again on top of the
+          # newest ledger and retry: a git rebase would conflict on the JSON.
+          ours="$RUNNER_TEMP/ledger.ours.json"
+          base="$RUNNER_TEMP/ledger.base.json"
+          cp "$LEDGER_DIR/ledger.json" "$ours"
+          git -C "$LEDGER_DIR" show HEAD:ledger.json > "$base" 2>/dev/null || echo '{"outcomes":[]}' > "$base"
+          for try in 1 2 3 4 5; do
+            git -C "$LEDGER_DIR" add -A
+            git -C "$LEDGER_DIR" -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -q -m 'chore: record mergeproof outcomes'
+            if git -C "$LEDGER_DIR" push origin "HEAD:$LEDGER_BRANCH"; then exit 0; fi
+            [ "$try" -lt 5 ] || break
+            sleep $(( try + RANDOM % 4 ))
             git -C "$LEDGER_DIR" fetch origin "$LEDGER_BRANCH"
-            git -C "$LEDGER_DIR" rebase "origin/$LEDGER_BRANCH"
-            git -C "$LEDGER_DIR" push origin "HEAD:$LEDGER_BRANCH"
-          fi
+            git -C "$LEDGER_DIR" reset -q --hard "origin/$LEDGER_BRANCH"
+            # New = in ours but not in base. Same rule as appendOutcome: an
+            # open entry for the PR is replaced, everything else is kept.
+            node -e '
+              const fs = require("fs");
+              const [oursPath, basePath, ledgerPath] = process.argv.slice(1);
+              const read = (p) => JSON.parse(fs.readFileSync(p, "utf8"));
+              const seen = new Set(read(basePath).outcomes.map((o) => JSON.stringify(o)));
+              const fresh = read(oursPath).outcomes.filter((o) => !seen.has(JSON.stringify(o)));
+              const ledger = read(ledgerPath);
+              for (const o of fresh) {
+                ledger.outcomes = ledger.outcomes.filter((x) => !(x.pr === o.pr && x.status === "open"));
+                ledger.outcomes.push(o);
+              }
+              fs.writeFileSync(ledgerPath, JSON.stringify(ledger, null, 2) + "\n");
+            ' "$ours" "$base" "$LEDGER_DIR/ledger.json"
+          done
+          echo "::error::could not push the ledger after 5 tries"
+          exit 1
       - name: RETRY with attempts left — dispatch the agent again
         # exit 3 (RETRY): while attempts remain and a dispatch marker named an
         # issue, the agent gets one more round on the same PR.

@@ -3,8 +3,9 @@
 // YAML parser — a small indentation-based splitter stands in for one).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { runProcess } from '../src/adapters/process.mjs';
 
 const ACTION = readFileSync(resolve('action.yml'), 'utf8');
@@ -258,10 +259,65 @@ test('pr workflow: the apply job lands the verdict and never installs anything',
   assert.doesNotMatch(apply, /\{\{INSTALL_COMMAND\}\}/, 'the apply job must never run an install command');
   assert.match(apply, /GH_TOKEN: \$\{\{ github\.token \}\}/, 'apply lands with github.token, so its comments are github-actions[bot] authored');
   assert.doesNotMatch(apply, /secrets\.MERGEPROOF_BOT_TOKEN/, "the agent's token never merges");
-  assert.match(apply, /group: mergeproof-ledger/);
+  assert.match(apply, /group: mergeproof-apply-\$\{\{ needs\.context\.outputs\.pr-number \}\}/, 'one group per PR: a shared group drops pending applies');
   assert.match(apply, /cancel-in-progress: false/);
   assert.match(apply, /gh workflow run mergeproof-issue\.yml/, 'RETRY re-dispatches the agent');
   assert.match(apply, /--add-label needs-human/, 'exhausted retries label the PR needs-human');
+});
+
+test('pr workflow: concurrent applies both land their outcomes on the ledger', (t) => {
+  // v0.1.1 put every apply in one concurrency group: GitHub keeps one pending
+  // job per group and cancels the rest, so four verdicts at once landed two.
+  // Now applies race on the push; run the real push step for two clones of
+  // one ledger branch and check the loser re-records its outcome on top.
+  const step = runBlocks(TEMPLATES['mergeproof-pr.yml']).find((b) => b.includes('chore: record mergeproof outcomes'));
+  assert.ok(step, 'the apply job needs a ledger push step');
+  const dir = mkdtempSync(join(tmpdir(), 'mp-ledger-race-')).replace(/\\/g, '/');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const git = (cwd, ...args) => {
+    const res = runProcess('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd });
+    assert.equal(res.code, 0, res.stderr);
+    return res.stdout;
+  };
+  const outcome = (pr, status) => ({ pr, kind: 'bugfix', agent: 'a', model: 'm', status });
+  const write = (d, outcomes) =>
+    writeFileSync(join(d, 'ledger.json'), `${JSON.stringify({ schema: 'mergeproof-ledger@1', outcomes }, null, 2)}\n`);
+  git(dir, 'init', '-q', '--bare', 'remote.git');
+  git(dir, 'init', '-q', '-b', 'mergeproof-ledger', 'seed');
+  write(`${dir}/seed`, [outcome(1, 'clean'), outcome(3, 'open')]);
+  git(`${dir}/seed`, 'add', '-A');
+  git(`${dir}/seed`, 'commit', '-q', '-m', 'seed');
+  git(`${dir}/seed`, 'push', '-q', `${dir}/remote.git`, 'mergeproof-ledger');
+  for (const c of ['a', 'b']) git(dir, 'clone', '-q', '-b', 'mergeproof-ledger', `${dir}/remote.git`, c);
+  write(`${dir}/a`, [outcome(1, 'clean'), outcome(3, 'open'), outcome(10, 'open')]);
+  write(`${dir}/b`, [outcome(1, 'clean'), outcome(3, 'pending')]); // b re-proved PR 3
+
+  const push = (c) => {
+    let res;
+    try {
+      res = runProcess('bash', ['-c', step], {
+        env: { ...process.env, RUNNER_TEMP: `${dir}/tmp-${c}`, LEDGER_BRANCH: 'mergeproof-ledger', LEDGER_DIR: `${dir}/${c}` },
+      });
+    } catch {
+      return null;
+    }
+    return res;
+  };
+  mkdirSync(`${dir}/tmp-a`);
+  mkdirSync(`${dir}/tmp-b`);
+  const first = push('a');
+  if (first === null) {
+    t.skip('bash is not available');
+    return;
+  }
+  assert.equal(first.code, 0, first.stderr);
+  const second = push('b');
+  assert.equal(second.code, 0, second.stderr);
+  const remote = JSON.parse(git(dir, '--git-dir', `${dir}/remote.git`, 'show', 'mergeproof-ledger:ledger.json'));
+  assert.deepEqual(
+    remote.outcomes.map((o) => `${o.pr}:${o.status}`).sort(),
+    ['10:open', '1:clean', '3:pending'],
+  );
 });
 
 test('issue workflow: gates who may start the agent', () => {

@@ -7,6 +7,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ## [0.1.1] - 2026-10-23
 
 ### Fixed
+- The PR workflow's apply jobs no longer share one concurrency group. GitHub keeps one pending job per group and cancels the rest, so when several verdicts arrived at once only the first and the last landed (no merge, comment, label or ledger entry for the others). Each PR now gets its own group, and a ledger push that loses the race records its outcomes again on top of the newest ledger and retries, instead of a `git rebase` that conflicts on the JSON.
 - The action split its `args` with `read -ra -d '' argv`, where `-a` took `-d` as the array name: every `check`/`apply`/`sync` run got no arguments and failed with a usage error. Now `read -r -d '' -a argv`, and a test runs the real script in bash.
 - `mergeproof-pr.yml` computed the next attempt as `${{ fromJSON(...) + 1 }}`; GitHub expressions have no arithmetic, so GitHub rejected the whole file and the gate never ran. The shell counts it now, and a test bans arithmetic in expressions. Re-run `mergeproof init --force` to refresh an installed copy.
 - The PR workflow's gate and apply jobs get `statuses: read`: the CI rollup includes commit statuses, and once any other app (a review bot) posts one, GitHub refused the whole query and the gate failed with "Resource not accessible by integration". The same query reads the workflow run behind each check suite, so the gate job also gets `actions: read`.
