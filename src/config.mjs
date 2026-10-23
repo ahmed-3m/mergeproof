@@ -23,7 +23,7 @@ export function defaultConfig() {
     limits: { maxDiffLines: 300, testTimeoutSec: 600 },
     proof: { baseFailRuns: 2, headPassRuns: 3, headReruns: 1 },
     trust: { minOutcomes: 10, minCleanRate: 0.9, revertWindowDays: 14 },
-    agents: { logins: [], branchPrefixes: ['agent/'] },
+    agents: { logins: [], branchPrefixes: ['agent/'], identities: {} },
     quarantine: [], // flaky test files excluded from proof runs
   };
 }
@@ -46,6 +46,43 @@ function typeOf(v) {
   return typeof v;
 }
 
+// A login → trust-bucket part (an `agent` or `model` name): machine-shaped and
+// bounded, because these strings flow into verdict files, comments and the
+// ledger, and a login with an identity is exactly as privileged as the flags.
+const IDENT_PART = /^[A-Za-z0-9._@/+-]{1,100}$/;
+
+/**
+ * `agents.identities` maps an agent login to its own trust bucket. The keys
+ * are GitHub logins, so they are dynamic and the generic `merge` cannot walk
+ * them (it would reject every login as an unknown key); the value shape is
+ * fixed: exactly `agent` and `model`. Membership in `agents.logins` is checked
+ * after the merge in parseConfig, because the logins list may come from the
+ * same file.
+ */
+function validateIdentities(value, path, fail) {
+  if (typeOf(value) !== 'object') fail(`"${path}" must be an object, got ${typeOf(value)}`);
+  const out = {};
+  for (const [login, identity] of Object.entries(value)) {
+    const at = `${path}.${login}`;
+    if (typeOf(identity) !== 'object') fail(`"${at}" must be an object with exactly "agent" and "model", got ${typeOf(identity)}`);
+    const keys = Object.keys(identity).sort();
+    if (keys.length !== 2 || keys[0] !== 'agent' || keys[1] !== 'model') {
+      fail(`"${at}" must be an object with exactly "agent" and "model", got ${keys.join(', ') || 'none'}`);
+    }
+    for (const part of ['agent', 'model']) {
+      if (typeof identity[part] !== 'string' || !IDENT_PART.test(identity[part])) {
+        fail(`"${at}.${part}" must be 1-100 characters of A-Za-z0-9._@/+-`);
+      }
+    }
+    out[login] = { agent: identity.agent, model: identity.model };
+  }
+  return out;
+}
+
+// Config keys whose values are maps (dynamic keys, fixed value shape) the
+// generic merge cannot validate; each gets its own validator instead.
+const MAPS = { 'agents.identities': validateIdentities };
+
 // Deep-merge `user` over `defaults`, rejecting keys and types the defaults don't
 // have, so a typo fails loudly instead of silently keeping a default.
 function merge(defaults, user, prefix, fail) {
@@ -54,6 +91,10 @@ function merge(defaults, user, prefix, fail) {
   for (const [key, value] of Object.entries(user)) {
     const path = prefix ? `${prefix}.${key}` : key;
     if (!Object.hasOwn(defaults, key)) fail(`unknown key "${path}"`);
+    if (MAPS[path]) {
+      out[key] = MAPS[path](value, path, fail);
+      continue;
+    }
     const want = typeOf(defaults[key]);
     if (want === 'object') {
       out[key] = merge(defaults[key], value, path, fail);
@@ -91,6 +132,11 @@ export function parseConfig(text, source = CONFIG_FILE) {
   if (!MODES.includes(cfg.mode)) fail(`"mode" must be one of ${MODES.join(', ')}`);
   for (const key of ['testCommand', 'testFileCommand']) {
     if (!cfg[key].trim()) fail(`"${key}" must not be empty`);
+  }
+  // An identity without its login in agents.logins can never gate a PR
+  // (notAnAgentPr refuses the author), so it is a config typo: fail loudly.
+  for (const login of Object.keys(cfg.agents.identities)) {
+    if (!cfg.agents.logins.includes(login)) fail(`"agents.identities.${login}" is not listed in "agents.logins"`);
   }
   return cfg;
 }

@@ -50,8 +50,21 @@ test('invalid config fails loudly with the offending key', () => {
     ['{ "paths": { "tests": [""] } }', /non-empty strings/],
     ['{ "paths": null }', /"paths" must be an object/],
     ['{ "testCommand": "  " }', /must not be empty/],
+    ['{ "agents": { "identities": [] } }', /"agents.identities" must be an object, got array/],
+    ['{ "agents": { "identities": { "agy-bot": "agy" } } }', /"agents.identities.agy-bot" must be an object with exactly "agent" and "model"/],
+    ['{ "agents": { "logins": ["agy-bot"], "identities": { "agy-bot": { "agent": "agy" } } } }', /exactly "agent" and "model", got agent/],
+    ['{ "agents": { "logins": ["agy-bot"], "identities": { "agy-bot": { "agent": "agy", "model": "gemini 4" } } } }', /"agents.identities.agy-bot.model" must be 1-100 characters/],
+    ['{ "agents": { "logins": ["agy-bot"], "identities": { "agy-bot": { "agent": "agy", "model": "m", "extra": 1 } } } }', /exactly "agent" and "model", got agent, extra, model/],
+    ['{ "agents": { "logins": ["claude-bot"], "identities": { "agy-bot": { "agent": "agy", "model": "m" } } } }', /"agents.identities.agy-bot" is not listed in "agents.logins"/],
   ];
   for (const [text, msg] of cases) {
     assert.throws(() => parseConfig(text), (err) => err instanceof FileFormatError && msg.test(err.message), text);
   }
+});
+
+test('agents.identities maps a login to its own trust bucket', () => {
+  const identities = { 'agy-bot': { agent: 'agy', model: 'gemini-4-argon-high' } };
+  const cfg = parseConfig(JSON.stringify({ agents: { logins: ['claude-bot', 'agy-bot'], identities } }));
+  assert.deepEqual(cfg.agents.identities, identities);
+  assert.deepEqual(defaultConfig().agents.identities, {}, 'the default is an empty map');
 });

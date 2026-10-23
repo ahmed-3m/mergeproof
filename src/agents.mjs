@@ -11,3 +11,15 @@ export function notAnAgentPr(pr, config) {
   }
   return null;
 }
+
+// The trust bucket for a PR: the base-branch identity (agents.identities) when
+// the login has one, the caller's flags otherwise. The config always comes
+// from the base branch tip, so the PR still cannot pick its own bucket — the
+// flags only stay the fallback so one workflow can gate several agents.
+// Shared by `check` (which gates) and `apply` (which re-checks a gate file),
+// so the two cannot drift.
+export function identityFor(pr, config, flags) {
+  const identity = config?.agents?.identities?.[pr?.author];
+  if (identity) return { agent: identity.agent, model: identity.model };
+  return { agent: flags.agent, model: flags.model };
+}

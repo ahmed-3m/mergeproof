@@ -71,6 +71,29 @@ The gate no-ops until configured: an empty `agents.logins` in `.mergeproof.json`
 
 Trust is earned per task kind and per agent+model: `MERGE` requires at least `trust.minOutcomes` (default 10) settled outcomes at `trust.minCleanRate` (default 90%) clean, and any revert in the recent window drops it. Until then every proven PR gets `HUMAN` — and **human merges of proven PRs still count toward trust**, which is how a new install earns autonomy: run in `shadow` mode, let the agent open PRs, merge the good ones yourself, and after 14 days (`trust.revertWindowDays`) the outcomes settle and the gate starts merging on its own. A low-volume repo can lower `minOutcomes` in its own `.mergeproof.json` — with eyes open: fewer outcomes means weaker evidence. Never seed a real ledger from `demo/ledger.json`; those outcomes did not happen.
 
+## Local agent: agy
+
+The Antigravity CLI (`agy`) can be a second coding agent, run from your own machine. Give it a machine account of its own (not your login), list it in `.mergeproof.json` on the default branch, and give it its own trust bucket:
+
+```json
+"agents": {
+  "logins": ["my-claude-bot", "my-agy-bot"],
+  "identities": { "my-agy-bot": { "agent": "agy", "model": "gemini-4-argon-high" } }
+}
+```
+
+Create a fine-grained PAT for that account on this one repository with `contents: write` and `pull-requests: write`, then, in a clone of the repo with `gh` signed in as yourself and `agy` signed in:
+
+```bash
+read -rs MERGEPROOF_DISPATCH_TOKEN && export MERGEPROOF_DISPATCH_TOKEN
+npx @ahmed-3m/mergeproof dispatch 17 --harness agy --dry-run   # prints the plan and the issue file
+npx @ahmed-3m/mergeproof dispatch 17 --harness agy
+```
+
+`dispatch` reads the issue once, writes the same trusted issue file the issue workflow builds (you vouch for the title and body by running it; comments are kept only from trusted authors), and runs `agy -p` with `--dangerously-skip-permissions` in a throwaway worktree on a new `agent/issue-17` branch. Headless agy denies file writes without that flag, which is why it never runs in your checkout. The token reaches agy's environment only, as `GH_TOKEN`; your other tokens and keys are removed from it. agy pushes and opens the PR as the agy account, and the PR workflow gates it like any agent PR, in the agy bucket. The worktree is removed when agy exits 0 and kept for inspection when it fails.
+
+Limits: a dispatched PR has no dispatch marker, so the gate gets no `--issue` (every agy PR is in the feature bucket, with no bugfix split) and a `RETRY` does not start agy again: run `dispatch` again or fix the PR by hand.
+
 ## GitHub Actions
 
 This repo's [`action.yml`](action.yml) is the reusable `ahmed-3m/mergeproof@v1` composite action (`check` | `apply` | `sync`), and [`templates/workflows/`](templates/README.md) ships the three workflow templates — issue to agent PR, PR to gate + apply, nightly ledger sync. `mergeproof init` copies them into your repo and fills in `{{CI_WORKFLOW}}` and `{{INSTALL_COMMAND}}` — the placeholders, repo variables and secrets are documented in [`templates/README.md`](templates/README.md), and every job's permissions in [SECURITY.md](SECURITY.md#workflow-permissions).

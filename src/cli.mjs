@@ -5,8 +5,9 @@ import { runCheck } from './commands/check.mjs';
 import { runApply } from './commands/apply.mjs';
 import { runSync } from './commands/sync.mjs';
 import { runInit } from './commands/init.mjs';
+import { runDispatch } from './commands/dispatch.mjs';
 
-const COMMANDS = { check: runCheck, apply: runApply, sync: runSync, init: runInit };
+const COMMANDS = { check: runCheck, apply: runApply, sync: runSync, init: runInit, dispatch: runDispatch };
 
 export const USAGE = `mergeproof v${VERSION} — let AI agents merge, only with proof
 
@@ -19,6 +20,8 @@ Usage:
                   [--agent <name>] [--model <name>] [--base-url <url>] [--bot-login <login>]
                   [--ci-workflow <name>] [--install-command <cmd>] [--test-command <cmd>]
                                                   install mergeproof into this repo (M2)
+  mergeproof dispatch <issue-number> --harness agy [--model <label>] [--dry-run]
+                                                   run a local coding agent on an issue (maintainer machine; never the gate)
   mergeproof --version | --help
 
 Options:
@@ -29,6 +32,7 @@ Options:
   --verdict-out <file>            check: write the verdict for an apply job, write nothing to GitHub
   --ledger <path>                 default .mergeproof/ledger.json
   --ref <ref>                     sync: branch whose history is scanned (default HEAD)
+  --harness <name>                dispatch: local coding agent to run (phase 1: agy); its login comes from agents.identities on the base branch, and the identity account's PAT must be in the MERGEPROOF_DISPATCH_TOKEN environment variable
   --bot-login <login>             init: login of the machine user whose token opens agent PRs (required)
   --base-url <url>                init: Anthropic-compatible endpoint (defaulted for glm-* models)
   --ci-workflow <name>            init: workflow whose PR CI the gate waits for (auto-detected)
