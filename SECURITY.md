@@ -50,7 +50,7 @@ Every job of every template (`templates/workflows/`), what it may do, which secr
 
 ## This repository
 
-`main` here is a free private repo, so it has no branch protection: any token with `repo` scope can push to it. `.github/workflows/main-guard.yml` makes that visible: a force-push, a commit that is not part of a merged PR, or a PR merged before its GitHub Actions checks were green fails the run and opens an issue. It detects, it does not prevent; a public repo or GitHub Pro is needed for enforcement.
+`main` here is a free private repo, so it has no branch protection: any token with `repo` scope can push to it. `.github/workflows/main-guard.yml` makes that visible: a force-push, a commit that is not part of a merged PR, or a PR merged before its GitHub Actions checks were green fails the run and opens an issue. It detects, it does not prevent: the push runs its own copy of the guard, so a deliberate writer can weaken it in the same push. A public repo or GitHub Pro is needed for enforcement.
 
 ## What mergeproof does not do
 
