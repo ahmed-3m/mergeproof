@@ -132,6 +132,7 @@ jobs:
       pull-requests: read
       checks: read
       statuses: read # the CI rollup includes commit statuses (other apps)
+      actions: read # ...and the workflow run behind each check suite
       issues: read
     concurrency:
       # A newer CI run for the same PR replaces this gate.

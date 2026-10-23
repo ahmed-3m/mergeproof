@@ -197,13 +197,15 @@ test('pr workflow: top-level permissions are empty and each job declares its own
   assert.match(PR_JOBS.context, /issues: read/);
 });
 
-test('pr workflow: jobs that read the CI rollup can read commit statuses too', () => {
+test('pr workflow: jobs that read the CI rollup can read statuses and workflow runs too', () => {
   // gh's statusCheckRollup mixes check runs and commit statuses; without
   // statuses: read GitHub refuses the whole query as soon as any other app
-  // (a review bot, say) has posted a status.
+  // (a review bot, say) has posted a status. It also asks for each check
+  // suite's workflow run, which needs actions: read (write includes read).
   for (const job of ['gate', 'apply']) {
     assert.match(PR_JOBS[job], /checks: read/, `${job} reads CI checks`);
     assert.match(PR_JOBS[job], /statuses: read/, `${job} needs statuses: read`);
+    assert.match(PR_JOBS[job], /actions: (read|write)/, `${job} needs actions: read`);
   }
 });
 
