@@ -20,7 +20,7 @@ Usage:
                   [--agent <name>] [--model <name>] [--base-url <url>] [--bot-login <login>]
                   [--ci-workflow <name>] [--install-command <cmd>] [--test-command <cmd>]
                                                   install mergeproof into this repo (M2)
-  mergeproof dispatch <issue-number> --harness agy [--model <label>] [--dry-run]
+  mergeproof dispatch <issue-number> --harness agy [--model <label>] [--vouch] [--dry-run]
                                                    run a local coding agent on an issue (maintainer machine; never the gate)
   mergeproof --version | --help
 

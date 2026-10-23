@@ -18,8 +18,13 @@ import { runProcess } from '../adapters/process.mjs';
 // comes from the default branch and the maintainer's own `gh` login; the one
 // thing it vouches for is the issue's title and body, because a human chose to
 // run the command. `--dangerously-skip-permissions` is required because
-// headless agy auto-denies file writes without it — which is exactly why the
-// agent runs in a throwaway git worktree, not in the maintainer's checkout.
+// headless agy auto-denies file writes without it — which is why the agent
+// runs in a throwaway git worktree, not in the maintainer's checkout. A
+// worktree is not a sandbox: agy still runs as the maintainer's OS user and
+// can read what that user can (other config, SSH keys, the maintainer's own
+// gh login). So text from an untrusted issue author, the one way a stranger's
+// instructions reach the agent, needs an explicit --vouch from the maintainer
+// who has read it; the docs recommend a dedicated OS user or VM.
 
 export const defaultDeps = {
   git,
@@ -126,7 +131,7 @@ export function agentEnv(env, token) {
 }
 
 export async function runDispatch(argv, deps = defaultDeps) {
-  const { positionals, flags } = parseFlags(argv, ['dry-run'], ['harness', 'model']);
+  const { positionals, flags } = parseFlags(argv, ['dry-run', 'vouch'], ['harness', 'model']);
   if (positionals.length !== 1 || !/^\d+$/.test(positionals[0]) || Number(positionals[0]) < 1) {
     throw new UsageError('expected exactly one <issue-number>');
   }
@@ -209,6 +214,10 @@ export async function runDispatch(argv, deps = defaultDeps) {
   const issueFile = join(workDir, `issue-${issue}.md`);
   writeFileSync(issueFile, buildIssueFile({ repo, number: issue, issue: issueData, comments, trusted }), 'utf8');
 
+  // An untrusted author's title and body run only on an explicit --vouch.
+  const authorTrusted = trusted(issueData.author);
+  const needsVouch = !authorTrusted && !flags.vouch;
+
   // 7. --dry-run: everything above was read-only; print the plan, spawn nothing.
   if (flags['dry-run']) {
     deps.print(
@@ -219,10 +228,16 @@ export async function runDispatch(argv, deps = defaultDeps) {
         `  branch: ${branch} (new, from ${defaultBranch})`,
         `  issue file: ${issueFile} (kept for inspection; delete it yourself)`,
         `  harness: ${HARNESS_BIN} in a throwaway worktree under ${workDir}`,
+        ...(needsVouch ? [`  author ${issueData.author ?? 'unknown'} is not trusted: read the issue file, then re-run with --vouch`] : []),
       ].join('\n'),
     );
     deps.print(`${branch} — dry-run: nothing spawned, nothing written to the repo`);
     return 0;
+  }
+
+  if (needsVouch) {
+    deps.rm(workDir);
+    throw new UsageError(`issue #${issue} is by ${issueData.author ?? 'an unknown author'}, who is not trusted (not in MERGEPROOF_AUTHORS, not a write/maintain/admin collaborator); read it (--dry-run writes the issue file) and re-run with --vouch to run agy on its text`);
   }
 
   // 4 (cont.). The worktree: the agent works on a branch of its own, in the
