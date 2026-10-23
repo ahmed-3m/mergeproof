@@ -177,6 +177,7 @@ export async function runDispatch(argv, deps = defaultDeps) {
   // 2. The issue, read once, and its comments — the agent never reads them
   // from GitHub itself.
   const issueData = deps.gh.getIssue({ repo, number: issue });
+  if (issueData.isPullRequest) throw new UsageError(`#${issue} in ${repo} is a pull request, not an issue`);
   const comments = deps.gh.issueComments({ repo, number: issue });
   const allowlisted = new Set(
     String(deps.env().MERGEPROOF_AUTHORS ?? '')

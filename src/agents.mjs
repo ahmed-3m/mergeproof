@@ -19,7 +19,8 @@ export function notAnAgentPr(pr, config) {
 // Shared by `check` (which gates) and `apply` (which re-checks a gate file),
 // so the two cannot drift.
 export function identityFor(pr, config, flags) {
-  const identity = config?.agents?.identities?.[pr?.author];
+  const identities = config?.agents?.identities ?? {};
+  const identity = pr?.author && Object.hasOwn(identities, pr.author) ? identities[pr.author] : null;
   if (identity) return { agent: identity.agent, model: identity.model };
   return { agent: flags.agent, model: flags.model };
 }

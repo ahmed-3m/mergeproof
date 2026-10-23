@@ -50,6 +50,7 @@ function typeOf(v) {
 // bounded, because these strings flow into verdict files, comments and the
 // ledger, and a login with an identity is exactly as privileged as the flags.
 const IDENT_PART = /^[A-Za-z0-9._@/+-]{1,100}$/;
+const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(?:\[bot\])?$/;
 
 /**
  * `agents.identities` maps an agent login to its own trust bucket. The keys
@@ -64,6 +65,8 @@ function validateIdentities(value, path, fail) {
   const out = {};
   for (const [login, identity] of Object.entries(value)) {
     const at = `${path}.${login}`;
+    // A GitHub login shape; also keeps "__proto__" and friends out of the map.
+    if (!LOGIN.test(login)) fail(`"${at}" is not a GitHub login`);
     if (typeOf(identity) !== 'object') fail(`"${at}" must be an object with exactly "agent" and "model", got ${typeOf(identity)}`);
     const keys = Object.keys(identity).sort();
     if (keys.length !== 2 || keys[0] !== 'agent' || keys[1] !== 'model') {

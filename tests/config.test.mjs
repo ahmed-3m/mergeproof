@@ -56,6 +56,7 @@ test('invalid config fails loudly with the offending key', () => {
     ['{ "agents": { "logins": ["agy-bot"], "identities": { "agy-bot": { "agent": "agy", "model": "gemini 4" } } } }', /"agents.identities.agy-bot.model" must be 1-100 characters/],
     ['{ "agents": { "logins": ["agy-bot"], "identities": { "agy-bot": { "agent": "agy", "model": "m", "extra": 1 } } } }', /exactly "agent" and "model", got agent, extra, model/],
     ['{ "agents": { "logins": ["claude-bot"], "identities": { "agy-bot": { "agent": "agy", "model": "m" } } } }', /"agents.identities.agy-bot" is not listed in "agents.logins"/],
+    ['{ "agents": { "identities": { "__proto__": { "agent": "agy", "model": "m" } } } }', /"agents.identities.__proto__" is not a GitHub login/],
   ];
   for (const [text, msg] of cases) {
     assert.throws(() => parseConfig(text), (err) => err instanceof FileFormatError && msg.test(err.message), text);

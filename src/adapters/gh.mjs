@@ -160,6 +160,7 @@ export function getIssue({ repo, number }) {
     title: raw.title ?? '',
     body: raw.body ?? '',
     labels: (raw.labels ?? []).map((l) => l.name),
+    isPullRequest: Boolean(raw.pull_request), // the issues API also returns PRs
   };
 }
 
