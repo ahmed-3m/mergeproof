@@ -57,9 +57,10 @@ const CONTRACT = {
   'src/commands/check.mjs': ['runCheck', 'evaluate'],
   'src/commands/apply.mjs': ['runApply'],
   'src/commands/sync.mjs': ['runSync', 'settle'],
+  'src/commands/init.mjs': ['runInit', 'detect'],
   'src/adapters/process.mjs': ['runProcess'],
   'src/adapters/git.mjs': ['changedFiles', 'changedPaths', 'diff', 'addedLines', 'addWorktree', 'removeWorktree', 'commonDir', 'log'],
-  'src/adapters/gh.mjs': ['getPullRequest', 'getChecksStatus', 'issueLabels', 'squashMerge', 'comment', 'createIssue', 'addLabel'],
+  'src/adapters/gh.mjs': ['getPullRequest', 'getChecksStatus', 'issueLabels', 'squashMerge', 'comment', 'createIssue', 'addLabel', 'repoView', 'createLabel', 'setVariable', 'setSecret', 'apiJson', 'branchExists', 'redactSecret'],
   'src/adapters/runner.mjs': ['runTests', 'parseTestCount'],
 };
 

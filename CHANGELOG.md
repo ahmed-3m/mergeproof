@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+- `mergeproof init` (M2 flow 1): detects the install command, test command, test paths and PR CI workflow; writes `.mergeproof.json` (always `mode: shadow`), the three workflows with placeholders filled and the bugfix/feature skills; idempotent, `--force` to replace drifted files, `--dry-run` to only plan.
+- With `--yes` (or an interactive `y`) it creates the `agent`/`needs-human` labels, sets the agent/model/bot-login variables and stores `MERGEPROOF_MODEL_KEY`/`MERGEPROOF_BOT_TOKEN` from the environment over `gh secret set` stdin, redacted from any error. A read-only check reports branch protection, merge restrictions (incl. the github-actions app), the bot permission and token guidance; it never changes protection.
+
+### Fixed
+- `check --head` stands down without reading the CI'd commit: after a force-push that commit may be gone, so the superseded verdict carries no kind instead of crashing in the diff.
+
 ## [0.1.0] - 2026-10-23
 
 ### Fixed
