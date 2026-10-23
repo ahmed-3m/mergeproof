@@ -48,6 +48,10 @@ Every job of every template (`templates/workflows/`), what it may do, which secr
 
 `init` writes only what its report lists: `.mergeproof.json` (always `mode: shadow`), the three workflow templates from `templates/workflows/` with their two placeholders filled, byte-for-byte copies of the bugfix and feature skills under `.mergeproof/skills/`, the `agent` and `needs-human` labels, the `MERGEPROOF_AGENT` / `MERGEPROOF_MODEL` / `MERGEPROOF_BOT_LOGIN` (and, when set, `MERGEPROOF_MODEL_BASE_URL`) repository variables, and the `MERGEPROOF_MODEL_KEY` / `MERGEPROOF_BOT_TOKEN` secrets. It never creates the ledger branch, never changes branch protection or any other repository setting (those are printed as guidance for the maintainer), and never overwrites an existing local file without `--force`. Secret values are read from the environment variables of the same name and travel to `gh secret set` on the child process's stdin only — never in argv, files or log output — and any error message gh produces is truncated to its first line and redacted of the value before it is shown.
 
+## This repository
+
+`main` here is a free private repo, so it has no branch protection: any token with `repo` scope can push to it. `.github/workflows/main-guard.yml` makes that visible: a force-push, a commit that is not part of a merged PR, or a PR merged before its GitHub Actions checks were green fails the run and opens an issue. It detects, it does not prevent: the push runs its own copy of the guard, so a deliberate writer can weaken it in the same push. A public repo or GitHub Pro is needed for enforcement.
+
 ## What mergeproof does not do
 
 - No telemetry. Nothing is sent anywhere except the GitHub API calls made through your own `gh` login.
