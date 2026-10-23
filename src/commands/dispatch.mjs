@@ -220,7 +220,7 @@ export async function runDispatch(argv, deps = defaultDeps) {
   // digest of the exact issue file the maintainer read (dry-run prints it). An
   // edit, a new trusted comment or a rename after that changes the digest, so
   // the vouch never carries over to text nobody reviewed.
-  const digest = createHash('sha256').update(issueText).digest('hex').slice(0, 16);
+  const digest = createHash('sha256').update(issueText).digest('hex'); // full 256 bits: the author picks the text, so a short prefix could be collided
   const needsVouch = !trusted(issueData.author) && flags.vouch !== digest;
 
   // 7. --dry-run: everything above was read-only; print the plan, spawn nothing.

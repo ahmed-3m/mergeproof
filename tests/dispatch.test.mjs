@@ -326,10 +326,10 @@ test('an untrusted author needs --vouch: refused before any worktree or spawn, r
   const all = [dry];
   try {
     assert.equal(await runDispatch([...ARGS, '--dry-run'], dry.deps), 0);
-    const digest = out.join('\n').match(/re-run with --vouch ([0-9a-f]{16})/)?.[1];
+    const digest = out.join('\n').match(/re-run with --vouch ([0-9a-f]{64})/)?.[1];
     assert.ok(digest, out.join('\n'));
     // A wrong digest, or the right one after an edit, is refused.
-    for (const [text, args] of [[issue, [...ARGS, '--vouch', '0'.repeat(16)]], [{ ...issue, body: 'Edited later.' }, [...ARGS, '--vouch', digest]]]) {
+    for (const [text, args] of [[issue, [...ARGS, '--vouch', '0'.repeat(64)]], [{ ...issue, body: 'Edited later.' }, [...ARGS, '--vouch', digest]]]) {
       const made = makeDeps({ gh: fakeGh({ issue: text }), env: { MERGEPROOF_DISPATCH_TOKEN: TOKEN } });
       all.push(made);
       await assert.rejects(runDispatch(args, made.deps), (err) => err.name === 'UsageError' && /changed since that --vouch digest/.test(err.message));
