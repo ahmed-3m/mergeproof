@@ -321,7 +321,8 @@ test('every action is pinned by a full commit SHA, except the agent harness and 
   // referenced by its release tag because the templates ship inside it.
   const TAG_ALLOWED = ['anthropics/claude-code-action', 'ahmed-3m/mergeproof'];
   for (const [file, text] of Object.entries(FILES)) {
-    const refs = [...text.matchAll(/uses: (\S+)/g)].map((m) => m[1]);
+    // A `uses:` key only, not the tail of `statuses:` in a permissions block.
+    const refs = [...text.matchAll(/^\s*(?:- )?uses: (\S+)/gm)].map((m) => m[1]);
     assert.ok(refs.length > 0, `${file} must use at least one action`);
     for (const ref of refs) {
       if (TAG_ALLOWED.some((a) => ref.startsWith(a))) continue;
