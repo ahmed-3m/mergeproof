@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -23,8 +24,8 @@ import { runProcess } from '../adapters/process.mjs';
 // worktree is not a sandbox: agy still runs as the maintainer's OS user and
 // can read what that user can (other config, SSH keys, the maintainer's own
 // gh login). So text from an untrusted issue author, the one way a stranger's
-// instructions reach the agent, needs an explicit --vouch from the maintainer
-// who has read it; the docs recommend a dedicated OS user or VM.
+// instructions reach the agent, needs an explicit --vouch <digest> from the
+// maintainer who has read exactly that text; the docs recommend a dedicated OS user or VM.
 
 export const defaultDeps = {
   git,
@@ -131,7 +132,7 @@ export function agentEnv(env, token) {
 }
 
 export async function runDispatch(argv, deps = defaultDeps) {
-  const { positionals, flags } = parseFlags(argv, ['dry-run', 'vouch'], ['harness', 'model']);
+  const { positionals, flags } = parseFlags(argv, ['dry-run'], ['harness', 'model', 'vouch']);
   if (positionals.length !== 1 || !/^\d+$/.test(positionals[0]) || Number(positionals[0]) < 1) {
     throw new UsageError('expected exactly one <issue-number>');
   }
@@ -212,11 +213,15 @@ export async function runDispatch(argv, deps = defaultDeps) {
   // the worktree, so one cleanup removes everything the run created.
   const workDir = deps.mkdtemp();
   const issueFile = join(workDir, `issue-${issue}.md`);
-  writeFileSync(issueFile, buildIssueFile({ repo, number: issue, issue: issueData, comments, trusted }), 'utf8');
+  const issueText = buildIssueFile({ repo, number: issue, issue: issueData, comments, trusted });
+  writeFileSync(issueFile, issueText, 'utf8');
 
-  // An untrusted author's title and body run only on an explicit --vouch.
-  const authorTrusted = trusted(issueData.author);
-  const needsVouch = !authorTrusted && !flags.vouch;
+  // An untrusted author's title and body run only on --vouch <digest>, the
+  // digest of the exact issue file the maintainer read (dry-run prints it). An
+  // edit, a new trusted comment or a rename after that changes the digest, so
+  // the vouch never carries over to text nobody reviewed.
+  const digest = createHash('sha256').update(issueText).digest('hex').slice(0, 16);
+  const needsVouch = !trusted(issueData.author) && flags.vouch !== digest;
 
   // 7. --dry-run: everything above was read-only; print the plan, spawn nothing.
   if (flags['dry-run']) {
@@ -228,7 +233,7 @@ export async function runDispatch(argv, deps = defaultDeps) {
         `  branch: ${branch} (new, from ${defaultBranch})`,
         `  issue file: ${issueFile} (kept for inspection; delete it yourself)`,
         `  harness: ${HARNESS_BIN} in a throwaway worktree under ${workDir}`,
-        ...(needsVouch ? [`  author ${issueData.author ?? 'unknown'} is not trusted: read the issue file, then re-run with --vouch`] : []),
+        ...(needsVouch ? [`  author ${issueData.author ?? 'unknown'} is not trusted: read the issue file, then re-run with --vouch ${digest}`] : []),
       ].join('\n'),
     );
     deps.print(`${branch} — dry-run: nothing spawned, nothing written to the repo`);
@@ -237,7 +242,8 @@ export async function runDispatch(argv, deps = defaultDeps) {
 
   if (needsVouch) {
     deps.rm(workDir);
-    throw new UsageError(`issue #${issue} is by ${issueData.author ?? 'an unknown author'}, who is not trusted (not in MERGEPROOF_AUTHORS, not a write/maintain/admin collaborator); read it (--dry-run writes the issue file) and re-run with --vouch to run agy on its text`);
+    const why = flags.vouch === null ? '' : ' (the issue changed since that --vouch digest, or the digest is wrong)';
+    throw new UsageError(`issue #${issue} is by ${issueData.author ?? 'an unknown author'}, who is not trusted (not in MERGEPROOF_AUTHORS, not a write/maintain/admin collaborator)${why}; read it with --dry-run, which writes the issue file and prints its --vouch digest, then re-run with --vouch <digest>`);
   }
 
   // 4 (cont.). The worktree: the agent works on a branch of its own, in the

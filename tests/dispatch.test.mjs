@@ -319,12 +319,29 @@ test('an untrusted author needs --vouch: refused before any worktree or spawn, r
   assert.deepEqual(refused.state.runs, [], 'nothing is spawned');
   assert.deepEqual(refused.deps.git.calls.worktree, [], 'no worktree');
   assert.ok(refused.state.dirs.every((dir) => !existsSync(dir)), 'the temp dir is removed');
-  const vouched = makeDeps({ gh: fakeGh({ issue }), env: { MERGEPROOF_DISPATCH_TOKEN: TOKEN } });
+  // The dry-run prints the digest of the issue file the maintainer reads.
+  const dry = makeDeps({ gh: fakeGh({ issue }), env: { MERGEPROOF_DISPATCH_TOKEN: TOKEN } });
+  const out = [];
+  dry.deps.print = (s) => out.push(s);
+  const all = [dry];
   try {
-    assert.equal(await runDispatch([...ARGS, '--vouch'], vouched.deps), 0);
+    assert.equal(await runDispatch([...ARGS, '--dry-run'], dry.deps), 0);
+    const digest = out.join('\n').match(/re-run with --vouch ([0-9a-f]{16})/)?.[1];
+    assert.ok(digest, out.join('\n'));
+    // A wrong digest, or the right one after an edit, is refused.
+    for (const [text, args] of [[issue, [...ARGS, '--vouch', '0'.repeat(16)]], [{ ...issue, body: 'Edited later.' }, [...ARGS, '--vouch', digest]]]) {
+      const made = makeDeps({ gh: fakeGh({ issue: text }), env: { MERGEPROOF_DISPATCH_TOKEN: TOKEN } });
+      all.push(made);
+      await assert.rejects(runDispatch(args, made.deps), (err) => err.name === 'UsageError' && /changed since that --vouch digest/.test(err.message));
+      assert.deepEqual(made.state.runs, []);
+    }
+    // The digest of the unchanged text runs agy.
+    const vouched = makeDeps({ gh: fakeGh({ issue }), env: { MERGEPROOF_DISPATCH_TOKEN: TOKEN } });
+    all.push(vouched);
+    assert.equal(await runDispatch([...ARGS, '--vouch', digest], vouched.deps), 0);
     assert.equal(vouched.state.runs.length, 1);
   } finally {
-    for (const dir of vouched.state.dirs) rmSync(dir, { recursive: true, force: true });
+    for (const made of all) for (const dir of made.state.dirs) rmSync(dir, { recursive: true, force: true });
   }
 });
 
