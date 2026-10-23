@@ -54,7 +54,8 @@ jobs:
       - name: Move the v1 tag (the action templates reference ahmed-3m/mergeproof@v1)
         run: |
           set -euo pipefail
-          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \n            tag -fa v1 -m "v1 tracks the latest release"
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            tag -fa v1 -m "v1 tracks the latest release"
           git push origin v1 --force
       - name: Create the GitHub Release from the changelog section
         env:
