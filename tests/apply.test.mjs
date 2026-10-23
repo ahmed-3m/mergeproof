@@ -312,6 +312,35 @@ test('a forged kind (file says bugfix, paths say refactor) is refused', async ()
   }
 });
 
+test('a gate HUMAN for a tamper note lands as that HUMAN, not as a forged file', async () => {
+  // The demo's test-edit PR: the gate said HUMAN for editing an existing test,
+  // and apply used to report the honest file as one that "disagrees".
+  const edit = BASE_FILES['tests/add.test.mjs'].replace('add(2, 2), 4', 'add(2, 3), 5');
+  const { repo, baseSha, headSha, ledger } = setup({ mode: 'enforce' }, { ...BUGFIX_CHANGE, 'tests/add.test.mjs': edit });
+  try {
+    const file = join(repo.dir, 'verdict.json');
+    assert.equal(await runCheck([URL, ...PR_ARGS, '--verdict-out', file], deps(repo, fakeGh(gateOpts(baseSha, headSha)), [])), 4);
+    const gh = fakeGh(gateOpts(baseSha, headSha));
+    const out = [];
+    assert.equal(await runApply([file, '--pr', URL, ...PR_ARGS], deps(repo, gh, out)), 4, out.join('\n'));
+    assert.doesNotMatch(out[0], /disagrees|did not survive/);
+    assert.match(out[0], /edits existing test tests\/add\.test\.mjs/);
+    assert.equal(gh.calls.merge.length, 0);
+    assert.deepEqual(gh.calls.label, ['needs-human']);
+    assert.equal(readLedger(ledger).outcomes.length, 20, 'no proof, nothing logged');
+
+    // The same note under a forged MERGE is still refused.
+    forge(file, (d) => { d.verdict = 'MERGE'; d.proven = true; });
+    const gh2 = fakeGh(gateOpts(baseSha, headSha));
+    const out2 = [];
+    assert.equal(await runApply([file, '--pr', URL, ...PR_ARGS], deps(repo, gh2, out2)), 4);
+    assert.match(out2[0], /verdict file disagrees with the re-check/);
+    assert.equal(gh2.calls.merge.length, 0);
+  } finally {
+    repo.cleanup();
+  }
+});
+
 test('a verdict file for another PR is refused: proof never transfers between PRs', async () => {
   const { repo, baseSha, headSha, ledger } = setup({ mode: 'enforce' });
   try {

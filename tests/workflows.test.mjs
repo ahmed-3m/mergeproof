@@ -318,6 +318,22 @@ test('pr workflow: concurrent applies both land their outcomes on the ledger', (
     remote.outcomes.map((o) => `${o.pr}:${o.status}`).sort(),
     ['10:open', '1:clean', '3:pending'],
   );
+
+  // A settled entry is never doubled: sync merged PR 10 meanwhile, so a late
+  // apply that still holds it as open fails instead of adding a second entry.
+  git(dir, 'clone', '-q', '-b', 'mergeproof-ledger', `${dir}/remote.git`, 'c');
+  write(`${dir}/c`, remote.outcomes.map((o) => (o.pr === 10 ? { ...o, status: 'pending' } : o)));
+  git(`${dir}/c`, 'commit', '-q', '-am', 'sync');
+  git(`${dir}/c`, 'push', '-q', 'origin', 'mergeproof-ledger');
+  git(`${dir}/a`, 'reset', '-q', '--hard', 'HEAD');
+  git(`${dir}/a`, 'pull', '-q', '--ff-only', 'origin', 'mergeproof-ledger');
+  git(`${dir}/a`, 'reset', '-q', '--hard', 'HEAD~1'); // a's view from before sync
+  write(`${dir}/a`, remote.outcomes.map((o) => (o.pr === 10 ? { ...o, model: 'n' } : o)));
+  const late = push('a');
+  assert.notEqual(late.code, 0, 'a late open entry must not land on a settled one');
+  assert.match(late.stdout, /PR 10 already has a settled outcome/);
+  const after = JSON.parse(git(dir, '--git-dir', `${dir}/remote.git`, 'show', 'mergeproof-ledger:ledger.json'));
+  assert.deepEqual(after.outcomes.filter((o) => o.pr === 10).map((o) => o.status), ['pending']);
 });
 
 test('issue workflow: gates who may start the agent', () => {

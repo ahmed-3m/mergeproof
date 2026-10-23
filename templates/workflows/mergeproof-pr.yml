@@ -311,7 +311,8 @@ jobs:
             git -C "$LEDGER_DIR" fetch origin "$LEDGER_BRANCH"
             git -C "$LEDGER_DIR" reset -q --hard "origin/$LEDGER_BRANCH"
             # New = in ours but not in base. Same rule as appendOutcome: an
-            # open entry for the PR is replaced, everything else is kept.
+            # open entry for the PR is replaced, a settled one (sync got there
+            # first) is never overwritten or doubled, so the push fails.
             node -e '
               const fs = require("fs");
               const [oursPath, basePath, ledgerPath] = process.argv.slice(1);
@@ -319,8 +320,13 @@ jobs:
               const seen = new Set(read(basePath).outcomes.map((o) => JSON.stringify(o)));
               const fresh = read(oursPath).outcomes.filter((o) => !seen.has(JSON.stringify(o)));
               const ledger = read(ledgerPath);
-              for (const o of fresh) {
+              const there = new Set(ledger.outcomes.map((o) => JSON.stringify(o)));
+              for (const o of fresh.filter((x) => !there.has(JSON.stringify(x)))) {
                 ledger.outcomes = ledger.outcomes.filter((x) => !(x.pr === o.pr && x.status === "open"));
+                if (ledger.outcomes.some((x) => x.pr === o.pr && x.status !== "closed")) {
+                  console.log("::error::PR " + o.pr + " already has a settled outcome on the ledger");
+                  process.exit(1);
+                }
                 ledger.outcomes.push(o);
               }
               fs.writeFileSync(ledgerPath, JSON.stringify(ledger, null, 2) + "\n");
