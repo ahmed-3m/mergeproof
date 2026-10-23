@@ -510,3 +510,73 @@ test('--head with --local is a usage error', async () => {
   await assert.rejects(runCheck(['--local', '--head', 'a'.repeat(40)]), /--head only applies to a pull request/);
   await assert.rejects(runCheck([URL, '--head', 'not-a-sha']), /--head must be a 40-character commit sha/);
 });
+
+// agents.identities: a login with an identity carries its own trust bucket;
+// the flags stay the fallback for logins without one. Same base-branch config
+// for check and apply, so the two cannot disagree.
+const IDENTITIES = { 'agy-bot': { agent: 'agy', model: 'gemini-4-argon-high' } };
+function identitySetup(mode = 'enforce') {
+  return setup({ mode, agents: { logins: ['agent-bot', 'agy-bot'], branchPrefixes: ['agent/'], identities: IDENTITIES } });
+}
+
+test('check uses the identity bucket for its author and the flags for everyone else', async () => {
+  const { repo, baseSha, headSha } = identitySetup();
+  try {
+    // agy-bot has an identity: its bucket is agy/gemini-4-argon-high, which the
+    // demo ledger has never trusted — HUMAN names that bucket, not the flags'.
+    const agyGh = fakeGh(gateOpts(baseSha, headSha, { author: 'agy-bot' }));
+    const out = [];
+    assert.equal(await runCheck([URL, ...PR_ARGS, '--dry-run'], deps(repo, agyGh, out)), 4, out.join('\n'));
+    assert.match(out[0], /bugfix for agy\/gemini-4-argon-high not trusted yet/);
+    assert.doesNotMatch(out[0], /claude-code\/glm-5.2/);
+    // agent-bot has no identity: the --agent/--model flags apply and the demo
+    // ledger trusts that bucket.
+    const botGh = fakeGh(gateOpts(baseSha, headSha));
+    const out2 = [];
+    assert.equal(await runCheck([URL, ...PR_ARGS, '--dry-run'], deps(repo, botGh, out2)), 0, out2.join('\n'));
+    assert.match(out2[0], /MERGE \(kind: bugfix\)/);
+  } finally {
+    repo.cleanup();
+  }
+});
+
+test('apply accepts a gate file carrying the resolved identity and refuses one carrying the raw flags', async () => {
+  const { repo, baseSha, headSha, ledger } = identitySetup();
+  try {
+    // The gate ran for agy-bot: with an identity, the verdict file carries
+    // agy/gemini-4-argon-high even though the workflow passed the raw flags.
+    const file = join(repo.dir, 'verdict.json');
+    assert.equal(await runCheck([URL, ...PR_ARGS, '--verdict-out', file], deps(repo, fakeGh(gateOpts(baseSha, headSha, { author: 'agy-bot' })), [])), 4);
+    assert.equal(readVerdictFile(file).agent, 'agy');
+    assert.equal(readVerdictFile(file).model, 'gemini-4-argon-high');
+
+    // apply gets the same raw flags, resolves the same identity, and lands the
+    // honest file: HUMAN (untrusted bucket), labelled, recorded — not "suspect".
+    const gh = fakeGh(gateOpts(baseSha, headSha, { author: 'agy-bot' }));
+    const out = [];
+    assert.equal(await runApply([file, '--pr', URL, ...PR_ARGS], deps(repo, gh, out)), 4, out.join('\n'));
+    assert.doesNotMatch(out[0], /does not match the workflow's flags|did not survive/);
+    assert.match(out[0], /bugfix for agy\/gemini-4-argon-high not trusted yet/);
+    assert.deepEqual(gh.calls.label, ['needs-human']);
+    assert.equal(gh.calls.comment.length, 1);
+    const last = readLedger(ledger).outcomes.at(-1);
+    assert.equal(last.agent, 'agy');
+    assert.equal(last.model, 'gemini-4-argon-high', 'the outcome is recorded under the identity bucket');
+
+    // The same file rewritten to carry the raw flag values instead is refused:
+    // the workflow's gate would never have written them for this login.
+    forge(file, (d) => {
+      d.agent = 'claude-code';
+      d.model = 'glm-5.2';
+    });
+    const gh2 = fakeGh(gateOpts(baseSha, headSha, { author: 'agy-bot' }));
+    const out2 = [];
+    assert.equal(await runApply([file, '--pr', URL, ...PR_ARGS], deps(repo, gh2, out2)), 4, out2.join('\n'));
+    assert.match(out2[0], /does not match the workflow's flags/);
+    assert.equal(gh2.calls.merge.length, 0);
+    assert.deepEqual(gh2.calls.label, ['needs-human']);
+    assert.equal(readLedger(ledger).outcomes.length, 21, 'nothing more is logged');
+  } finally {
+    repo.cleanup();
+  }
+});

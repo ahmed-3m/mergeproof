@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import { parseFlags } from '../args.mjs';
 import { UsageError } from '../errors.mjs';
 import { CONFIG_FILE, parseConfig } from '../config.mjs';
-import { notAnAgentPr } from '../agents.mjs';
+import { notAnAgentPr, identityFor } from '../agents.mjs';
 import { inspect } from '../inspect.mjs';
 import { decide } from '../decide.mjs';
 import { DEFAULT_LEDGER, readLedger, trustFor } from '../ledger.mjs';
@@ -32,8 +32,8 @@ export async function runApply(argv, deps = defaultDeps) {
   const prUrl = flags.pr;
   if (!prUrl || !gh.parsePrUrl(prUrl)) throw new UsageError('apply requires --pr <pr-url> (the pull request the gate job checked)');
   if (flags.head !== null && !/^[0-9a-f]{40}$/.test(flags.head)) throw new UsageError('--head must be a 40-character commit sha');
-  const agent = flags.agent;
-  const model = flags.model;
+  let agent = flags.agent;
+  let model = flags.model;
   if (!agent || !model) throw new UsageError('apply requires --agent and --model (the same values the gate job got)');
   const attempts = flags.attempt === null ? 1 : Number(flags.attempt);
   if (!Number.isInteger(attempts) || attempts < 1) throw new UsageError('--attempt must be a positive integer');
@@ -60,10 +60,13 @@ export async function runApply(argv, deps = defaultDeps) {
   };
 
   // The workflow passes the same trust-bucket flags to both jobs; a file that
-  // carries different ones was not written by this workflow's gate.
+  // carries different ones was not written by this workflow's gate. The
+  // agent/model half of that check happens later, after the base-branch
+  // config is loaded: a login with an identity (agents.identities) resolves
+  // to its own bucket, and the file must carry the resolved values.
   if (verdict.url !== prUrl) return suspect('verdict file is for a different pull request');
-  const fromFlags = { agent, model, skill, attempts, issue };
-  const fromFile = { agent: verdict.agent, model: verdict.model, skill: verdict.skill, attempts: verdict.attempts, issue: verdict.issue };
+  const fromFlags = { skill, attempts, issue };
+  const fromFile = { skill: verdict.skill, attempts: verdict.attempts, issue: verdict.issue };
   if (Object.keys(fromFlags).some((k) => fromFile[k] !== fromFlags[k])) {
     return suspect("verdict file does not match the workflow's flags");
   }
@@ -105,6 +108,16 @@ export async function runApply(argv, deps = defaultDeps) {
   const notAgent = notAnAgentPr(pr, config);
   if (notAgent) return refuse(notAgent);
   if (config.mode === 'off') return refuse('mergeproof is off for this repo');
+
+  // The trust bucket resolves exactly like the gate's (identityFor): the
+  // base-branch identity for this login when it has one, the workflow's flags
+  // otherwise. The file is compared against these resolved values, so a gate
+  // run that resolved an identity is not "suspect" for carrying it — and a
+  // file carrying the raw flag values for an identity login still is.
+  ({ agent, model } = identityFor(pr, config, { agent, model }));
+  if (verdict.agent !== agent || verdict.model !== model) {
+    return suspect("verdict file does not match the workflow's flags");
+  }
 
   // Re-derive kind and the path tamper rules with git only (the same inspect()
   // the gate uses, so the two cannot drift).

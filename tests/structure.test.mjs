@@ -50,7 +50,7 @@ const CONTRACT = {
   'src/decide.mjs': ['decide'],
   'src/ledger.mjs': ['LEDGER_SCHEMA', 'DEFAULT_LEDGER', 'readLedger', 'writeLedger', 'appendOutcome', 'trustFor'],
   'src/trailer.mjs': ['TRAILER_KEY', 'formatTrailer', 'parseTrailer'],
-  'src/agents.mjs': ['notAnAgentPr'],
+  'src/agents.mjs': ['notAnAgentPr', 'identityFor'],
   'src/inspect.mjs': ['inspect'],
   'src/land.mjs': ['land'],
   'src/verdictfile.mjs': ['VERDICT_FILE_SCHEMA', 'writeVerdictFile', 'readVerdictFile'],
@@ -58,9 +58,10 @@ const CONTRACT = {
   'src/commands/apply.mjs': ['runApply'],
   'src/commands/sync.mjs': ['runSync', 'settle'],
   'src/commands/init.mjs': ['runInit', 'detect'],
+  'src/commands/dispatch.mjs': ['runDispatch', 'buildIssueFile', 'agentPrompt', 'agentEnv', 'HARNESS_BIN', 'TOKEN_ENV'],
   'src/adapters/process.mjs': ['runProcess'],
-  'src/adapters/git.mjs': ['changedFiles', 'changedPaths', 'diff', 'addedLines', 'addWorktree', 'removeWorktree', 'commonDir', 'log'],
-  'src/adapters/gh.mjs': ['getPullRequest', 'getChecksStatus', 'issueLabels', 'squashMerge', 'comment', 'createIssue', 'addLabel', 'repoView', 'createLabel', 'setVariable', 'setSecret', 'apiJson', 'branchExists', 'redactSecret'],
+  'src/adapters/git.mjs': ['changedFiles', 'changedPaths', 'diff', 'addedLines', 'addWorktree', 'removeWorktree', 'addBranchWorktree', 'refExists', 'commonDir', 'log'],
+  'src/adapters/gh.mjs': ['getPullRequest', 'getChecksStatus', 'issueLabels', 'squashMerge', 'comment', 'createIssue', 'addLabel', 'repoView', 'createLabel', 'setVariable', 'setSecret', 'apiJson', 'branchExists', 'redactSecret', 'getIssue', 'issueComments', 'collaboratorPermission'],
   'src/adapters/runner.mjs': ['runTests', 'parseTestCount'],
 };
 

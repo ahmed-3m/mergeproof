@@ -8,7 +8,7 @@ import { proveChange } from '../prove.mjs';
 import { decide } from '../decide.mjs';
 import { DEFAULT_LEDGER, readLedger, trustFor } from '../ledger.mjs';
 import { EXIT_CODES, formatVerdict, makeVerdict } from '../verdict.mjs';
-import { notAnAgentPr } from '../agents.mjs';
+import { notAnAgentPr, identityFor } from '../agents.mjs';
 import { inspect } from '../inspect.mjs';
 import { VERDICT_FILE_SCHEMA, writeVerdictFile } from '../verdictfile.mjs';
 import { land } from '../land.mjs';
@@ -167,6 +167,12 @@ export async function runCheck(argv, deps = defaultDeps) {
   // The gate config is today's base branch tip, never the PR and never an old
   // merge-base the PR happened to branch from.
   const config = parseConfig(deps.git.showFile(root, input.configSha, CONFIG_FILE), `${CONFIG_FILE} (base ${input.configSha.slice(0, 7)})`);
+  // A login with an identity in that config (agents.identities) carries its
+  // own trust bucket, replacing the workflow's flags; logins without one keep
+  // them. `check --local` never resolves an identity — flags/env as before.
+  if (pr) {
+    ({ agent: input.agent, model: input.model } = identityFor(pr, config, { agent: input.agent, model: input.model }));
+  }
 
   // The workflow pins the head whose CI completed (--head, from the triggering
   // event). If the PR has moved since, gating the live head would judge a

@@ -149,6 +149,39 @@ export function apiJson(path, { allow404 = false } = {}) {
   throw new Error(`gh api failed: ${first}`);
 }
 
+// ---- `mergeproof dispatch` support. Reads for the local runner (a
+// maintainer's machine, their own gh login); dispatch never decides a verdict.
+
+/** One read of an issue: author, title, body and label names. */
+export function getIssue({ repo, number }) {
+  const raw = apiJson(`repos/${repo}/issues/${number}`);
+  return {
+    author: raw.user?.login ?? null,
+    title: raw.title ?? '',
+    body: raw.body ?? '',
+    labels: (raw.labels ?? []).map((l) => l.name),
+    isPullRequest: Boolean(raw.pull_request), // the issues API also returns PRs
+  };
+}
+
+/** Every comment on an issue, paginated: [{ author, body }]. */
+export function issueComments({ repo, number }) {
+  const raw = JSON.parse(gh(['api', `repos/${repo}/issues/${number}/comments`, '--paginate']));
+  return (Array.isArray(raw) ? raw : []).map((c) => ({ author: c.user?.login ?? null, body: c.body ?? '' }));
+}
+
+/**
+ * A login's collaborator permission (admin | maintain | write | triage | read),
+ * or null on any API error — the caller treats null as untrusted (fail closed).
+ */
+export function collaboratorPermission({ repo, login }) {
+  try {
+    return apiJson(`repos/${repo}/collaborators/${encodeURIComponent(login)}/permission`)?.permission ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** Does the branch exist? A 404 means no; anything else throws. */
 export function branchExists({ repo, branch }) {
   return apiJson(`repos/${repo}/branches/${encodeURIComponent(branch)}`, { allow404: true }) !== null;

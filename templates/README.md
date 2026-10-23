@@ -39,7 +39,7 @@ enforce lives in `.mergeproof.json`, not in this variable.
 | Variable | Default | Who sets it | Meaning |
 |---|---|---|---|
 | `MERGEPROOF_MODE` | unset (runs) | Maintainer | **Kill switch only.** Set to `off` and every mergeproof workflow stops before doing anything. Shadow vs enforce mode is configured per repo in `.mergeproof.json`. |
-| `MERGEPROOF_AGENT` | none | `mergeproof init` | Agent name for the trust bucket (`--agent`), e.g. `claude-code`. Never read from the PR. |
+| `MERGEPROOF_AGENT` | none | `mergeproof init` | Agent name for the trust bucket (`--agent`), e.g. `claude-code`. Never read from the PR. A PR whose author has an entry in `agents.identities` (base-branch `.mergeproof.json`) uses that entry's agent and model instead. |
 | `MERGEPROOF_MODEL` | none | `mergeproof init` | Model name for the trust bucket (`--model` and the agent's `--model` arg), e.g. `glm-4.7`. |
 | `MERGEPROOF_MODEL_BASE_URL` | unset | `mergeproof init` | Anthropic-compatible endpoint the agent action talks to; `https://api.z.ai/api/anthropic` for GLM. Leave unset for Anthropic's own API. |
 | `MERGEPROOF_AUTHORS` | empty | Maintainer | Comma-separated logins whose newly opened issues start the agent, e.g. `alice,bob`. Empty means only the `agent` label (or a dispatch) starts runs. |

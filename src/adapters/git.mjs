@@ -151,6 +151,21 @@ export function addWorktree(repoRoot, sha) {
   return dir;
 }
 
+/** Does the ref resolve to a commit? (a local branch, a remote ref, a tag) */
+export function refExists(repoRoot, ref) {
+  return git(repoRoot, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { allowFail: true }).code === 0;
+}
+
+/**
+ * Worktree at `dir` (caller-chosen, e.g. inside a dispatch temp dir) on a NEW
+ * branch created from `startPoint`. Unlike addWorktree this is a branch, not a
+ * detached checkout, so work done there can be pushed as that branch.
+ */
+export function addBranchWorktree(repoRoot, dir, branch, startPoint) {
+  git(repoRoot, ['worktree', 'add', '-b', branch, dir, startPoint]);
+  return dir;
+}
+
 export function removeWorktree(repoRoot, dir) {
   git(repoRoot, ['worktree', 'remove', '--force', dir], { allowFail: true });
   rmSync(dir, { recursive: true, force: true });
