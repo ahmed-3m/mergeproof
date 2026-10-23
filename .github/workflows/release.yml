@@ -67,7 +67,9 @@ jobs:
             const fs = require("fs");
             const v = process.argv[1].replace(/^v/, "");
             const s = fs.readFileSync("CHANGELOG.md", "utf8");
-            const m = s.match(new RegExp("^## \\[" + v + "\\].*$\\n([\\s\\S]*?)(?=^## \\[|$)", "m"));
+            // Under "m", a bare $ is any line end and the lazy section match
+            // would stop at the first one; (?![\\s\\S]) is the end of the file.
+            const m = s.match(new RegExp("^## \\[" + v + "\\][^\\n]*\\n([\\s\\S]*?)(?=^## \\[|(?![\\s\\S]))", "m"));
             process.stdout.write(m ? m[1].trim() : "");
           ' "$TAG")"
           # Create only when missing; a real create failure (auth, API) must

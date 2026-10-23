@@ -4,6 +4,9 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Fixed
+- The release workflow fills the GitHub Release notes from the tagged CHANGELOG section again: under the regex "m" flag a bare `$` matched the first line end, so v0.1.1 and v0.1.2 shipped with empty notes (both were filled in by hand).
+
 ## [0.1.2] - 2026-10-23
 
 ### Security

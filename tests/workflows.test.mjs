@@ -642,3 +642,21 @@ test('every action is pinned by a full commit SHA, except the agent harness and 
     }
   }
 });
+
+test('release workflow: the notes script extracts the tagged CHANGELOG section', (t) => {
+  // v0.1.1 and v0.1.2 shipped with empty notes: under the "m" flag a bare $
+  // matched the first line end. Run the workflow's own script, not a copy.
+  const release = readFileSync(resolve('.github/workflows/release.yml'), 'utf8').replace(/\r/g, '');
+  const script = release.match(/node -e '\n([\s\S]*?)\n\s*' "\$TAG"/);
+  assert.ok(script, 'release.yml must extract the notes with node -e');
+  const dir = mkdtempSync(join(tmpdir(), 'mp-release-notes-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const changelog = ['# Changelog', '', '## [Unreleased]', '', '## [0.2.0] - 2026-11-01', '', '### Fixed', '- Second fix.', '', '## [0.1.0] - 2026-10-01', '', '### Added', '- First release.', ''];
+  for (const eol of ['\n', '\r\n']) {
+    writeFileSync(join(dir, 'CHANGELOG.md'), changelog.join(eol));
+    const notes = (v) => runProcess('node', ['-e', script[1], v], { cwd: dir }).stdout.replace(/\r/g, '');
+    assert.equal(notes('v0.2.0'), '### Fixed\n- Second fix.', 'a middle section stops at the next heading');
+    assert.equal(notes('v0.1.0'), '### Added\n- First release.', 'the last section runs to the end of the file');
+    assert.equal(notes('v9.9.9'), '', 'a missing version gives empty notes');
+  }
+});
