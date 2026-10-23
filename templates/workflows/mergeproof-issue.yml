@@ -197,7 +197,7 @@ jobs:
             # check cannot reach the agent, and one landing before it fails
             # the check. Stale, removed or unreadable means stop.
             vouch_query='query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { issue(number: $number) { lastEditedAt timelineItems(last: 100, itemTypes: [LABELED_EVENT, UNLABELED_EVENT, RENAMED_TITLE_EVENT]) { nodes { __typename ... on LabeledEvent { createdAt actor { login } label { name } } ... on UnlabeledEvent { createdAt label { name } } ... on RenamedTitleEvent { createdAt } } } } } }'
-            vouch_jq='.data.repository.issue as $i | ([$i.timelineItems.nodes[] | select(.label.name? == "agent")] | last) as $l | if $l == null or $l.__typename != "LabeledEvent" then "stale" elif ($i.lastEditedAt // "") > $l.createdAt then "stale" elif any($i.timelineItems.nodes[]; .__typename == "RenamedTitleEvent" and .createdAt > $l.createdAt) then "stale" else "ok \($l.actor.login // "")" end'
+            vouch_jq='.data.repository.issue as $i | ([$i.timelineItems.nodes[] | select(.label.name? == "agent")] | last) as $l | if $l == null or $l.__typename != "LabeledEvent" then "stale" elif ($i.lastEditedAt // "") >= $l.createdAt then "stale" elif any($i.timelineItems.nodes[]; .__typename == "RenamedTitleEvent" and .createdAt >= $l.createdAt) then "stale" else "ok \($l.actor.login // "")" end'
             if ! vouch_out="$(gh api graphql -F owner="${REPO%%/*}" -F name="${REPO#*/}" -F number="$ISSUE_NUMBER" -f query="$vouch_query" --jq "$vouch_jq")"; then
               gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body "Mergeproof could not read this issue's edit and label history, so the agent was not started. A collaborator with write access should re-apply the agent label to vouch for the issue."
               echo "::error::could not read the edit and label history of issue #$ISSUE_NUMBER — not starting the agent (fail closed)"
@@ -213,26 +213,18 @@ jobs:
             emit "Issue title and body — by $issue_author (vouched by the agent label, unchanged since)" "$(printf '# %s\n\n%s' "$issue_title" "$issue_body")"
           fi
 
-          # Comments: only from authors the same check trusts, plus
-          # github-actions[bot] verdict comments (they contain
-          # "Mergeproof —"); every other comment is dropped and counted.
-          # Bodies move between jq and bash base64-encoded, so nothing in a
-          # body can forge a login field or a line of its own.
+          # Comments: only from authors the same check trusts; every other
+          # comment is dropped and counted. github-actions[bot] is dropped
+          # too: any workflow in the repo can post as it, and the gate's
+          # verdicts land on the pull request, read below. Bodies move
+          # between jq and bash base64-encoded, so nothing in a body can
+          # forge a login field or a line of its own.
           omitted=0
           comments="$(gh api "repos/$REPO/issues/$ISSUE_NUMBER/comments" --paginate --jq '.[] | [.user.login, ((.body // "") | @base64)] | join(" ")')"
           while read -r c_login c_b64; do
             [ -n "$c_login" ] || continue
             c_body="$(printf '%s' "$c_b64" | base64 -d)"
-            if [ "$c_login" = 'github-actions[bot]' ]; then
-              case "$c_body" in
-                *"Mergeproof —"*)
-                  emit "Comment — by github-actions[bot] (mergeproof verdict)" "$c_body"
-                  ;;
-                *)
-                  omitted=$((omitted + 1))
-                  ;;
-              esac
-            elif trusted "$c_login"; then
+            if [ "$c_login" != 'github-actions[bot]' ] && trusted "$c_login"; then
               emit "Comment — by $c_login (trusted)" "$c_body"
             else
               omitted=$((omitted + 1))
@@ -241,9 +233,11 @@ jobs:
 
           # On a retry the gate's latest verdict — a github-actions[bot]
           # comment on the pull request — belongs in the same file, so the
-          # agent reads the notes from it instead of following a URL.
+          # agent reads the notes from it instead of following a URL. Only a
+          # body in the exact shape apply posts counts (anchored, not a
+          # substring another bot comment could quote).
           if [ -n "$PR_NUMBER" ]; then
-            verdict="$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" --paginate --jq '[.[] | select(.user.login == "github-actions[bot]") | select(.body | contains("Mergeproof —"))][-1].body // empty | @base64' | tail -n 1 | base64 -d)"
+            verdict="$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" --paginate --jq '[.[] | select(.user.login == "github-actions[bot]") | select(.body | startswith("```\nMergeproof — "))][-1].body // empty | @base64' | tail -n 1 | base64 -d)"
             if [ -z "$verdict" ]; then
               echo "::error::could not find the gate's latest Mergeproof verdict comment on pull request #$PR_NUMBER — not starting the retry (fail closed)"
               exit 1
