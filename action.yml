@@ -65,7 +65,7 @@ runs:
         # command expansion happens on them. -d '' reads the whole variable,
         # not just its first line, and read returns 1 at the EOF it then hits.
         set -f
-        read -ra -d '' argv <<< "$MERGEPROOF_ARGS" || true
+        read -r -d '' -a argv <<< "$MERGEPROOF_ARGS" || true
         set +f
         code=0
         node "$GITHUB_ACTION_PATH/bin/mergeproof.mjs" "$MERGEPROOF_COMMAND" "${argv[@]}" || code=$?

@@ -113,7 +113,12 @@ export async function runApply(argv, deps = defaultDeps) {
   const issueLabels = issue ? deps.gh.issueLabels(prUrl, [issue]) : [];
   const { kind, tamperNotes } = inspect({ root, baseSha, headSha: verdict.headSha, config, claims, issueLabels }, deps);
 
-  if (tamperNotes.length > 0) return suspect('verdict file disagrees with the re-check', tamperNotes);
+  // A tamper note forces HUMAN with no proof, in the gate as here. A file that
+  // says so agrees and lands normally (comment + label, nothing logged); one
+  // that says anything else hid the tampering.
+  if (tamperNotes.length > 0 && (verdict.verdict !== 'HUMAN' || verdict.proven)) {
+    return suspect('verdict file disagrees with the re-check', tamperNotes);
+  }
   if (kind !== verdict.kind) {
     return suspect(`verdict file disagrees with the re-check (file says ${verdict.kind ?? 'no kind'}, paths say ${kind ?? 'no kind'})`);
   }

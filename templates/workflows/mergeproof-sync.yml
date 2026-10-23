@@ -22,8 +22,8 @@ jobs:
   sync:
     if: vars.MERGEPROOF_MODE != 'off'
     concurrency:
-      # The ledger branch is written here and by mergeproof-pr's apply job;
-      # never cancel mid-write.
+      # Sync runs one at a time; mergeproof-pr's apply jobs also push to the
+      # ledger branch and retry on top of whichever push lands first.
       group: mergeproof-ledger
       cancel-in-progress: false
     runs-on: ubuntu-latest

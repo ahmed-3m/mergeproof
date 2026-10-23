@@ -3,8 +3,10 @@
 // YAML parser — a small indentation-based splitter stands in for one).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { runProcess } from '../src/adapters/process.mjs';
 
 const ACTION = readFileSync(resolve('action.yml'), 'utf8');
 const TEMPLATE_DIR = resolve('templates/workflows');
@@ -108,8 +110,31 @@ test('action.yml passes args through the environment and runs the repo binary', 
   }
   const run = runBlocks(ACTION).find((b) => b.includes('bin/mergeproof.mjs'));
   assert.ok(run, 'action.yml must run bin/mergeproof.mjs');
-  assert.match(run, /read -ra|set --/, 'args must be split without shell expansion');
+  assert.match(run, /read -r -d '' -a argv/, 'args must be split without shell expansion');
   assert.match(run, /GITHUB_ACTION_PATH/);
+});
+
+test('action.yml really splits args into separate words in bash', (t) => {
+  // The v0.1.0 action wrote `read -ra -d '' argv`: -a took `-d` as the array
+  // name, every gate run got no arguments and died with a usage error. Run
+  // the real script with the node call swapped for a printer.
+  const run = runBlocks(ACTION).find((b) => b.includes('bin/mergeproof.mjs'));
+  const script = run
+    .split(/\r?\n/)
+    .filter((l) => !l.includes('GITHUB_OUTPUT') && !/^\s*exit /.test(l))
+    .map((l) => (l.includes('bin/mergeproof.mjs') ? 'printf "<%s>\n" "$MERGEPROOF_COMMAND" "${argv[@]}"' : l))
+    .join('\n');
+  let res;
+  try {
+    res = runProcess('bash', ['-c', script], {
+      env: { ...process.env, MERGEPROOF_COMMAND: 'check', MERGEPROOF_ARGS: 'https://x/pull/1 --head abc  --agent a*b\n--attempt 2' },
+    });
+  } catch {
+    t.skip('bash is not available');
+    return;
+  }
+  assert.equal(res.code, 0, res.stderr);
+  assert.equal(res.stdout.replace(/\r/g, ''), '<check>\n<https://x/pull/1>\n<--head>\n<abc>\n<--agent>\n<a*b>\n<--attempt>\n<2>\n');
 });
 
 for (const [file, text] of Object.entries(TEMPLATES)) {
@@ -146,6 +171,18 @@ for (const [file, text] of Object.entries(TEMPLATES)) {
     }
   });
 
+  test(`${file}: expressions use no arithmetic`, () => {
+    // GitHub expressions have no + - * / operators: one anywhere makes GitHub
+    // reject the whole file, so the workflow silently never runs. Do the math
+    // in the run: script instead.
+    const exprs = [...text.matchAll(/\$\{\{([\s\S]*?)\}\}/g)].map((m) => m[1]);
+    exprs.push(...[...text.matchAll(/^\s*if:\s*(.+)$/gm)].map((m) => m[1]));
+    for (const expr of exprs) {
+      const bare = expr.replace(/'[^']*'/g, "''");
+      assert.doesNotMatch(bare, /[\w)\]]\s*[+*/]\s*[\w(]|\s-\s/, `${file}: arithmetic in expression: ${expr.trim()}`);
+    }
+  });
+
   test(`${file}: no user-controlled event text inside any run: block`, () => {
     for (const block of runBlocks(text)) {
       for (const banned of USER_TEXT) {
@@ -159,6 +196,18 @@ test('pr workflow: top-level permissions are empty and each job declares its own
   assert.match(TEMPLATES['mergeproof-pr.yml'], /^permissions: \{\}/m);
   assert.match(PR_JOBS.context, /pull-requests: read/);
   assert.match(PR_JOBS.context, /issues: read/);
+});
+
+test('pr workflow: jobs that read the CI rollup can read statuses and workflow runs too', () => {
+  // gh's statusCheckRollup mixes check runs and commit statuses; without
+  // statuses: read GitHub refuses the whole query as soon as any other app
+  // (a review bot, say) has posted a status. It also asks for each check
+  // suite's workflow run, which needs actions: read (write includes read).
+  for (const job of ['gate', 'apply']) {
+    assert.match(PR_JOBS[job], /checks: read/, `${job} reads CI checks`);
+    assert.match(PR_JOBS[job], /statuses: read/, `${job} needs statuses: read`);
+    assert.match(PR_JOBS[job], /actions: (read|write)/, `${job} needs actions: read`);
+  }
 });
 
 test('pr workflow: triggered by workflow_run, never by pull_request', () => {
@@ -210,10 +259,81 @@ test('pr workflow: the apply job lands the verdict and never installs anything',
   assert.doesNotMatch(apply, /\{\{INSTALL_COMMAND\}\}/, 'the apply job must never run an install command');
   assert.match(apply, /GH_TOKEN: \$\{\{ github\.token \}\}/, 'apply lands with github.token, so its comments are github-actions[bot] authored');
   assert.doesNotMatch(apply, /secrets\.MERGEPROOF_BOT_TOKEN/, "the agent's token never merges");
-  assert.match(apply, /group: mergeproof-ledger/);
+  assert.match(apply, /group: mergeproof-apply-\$\{\{ needs\.context\.outputs\.pr-number \}\}/, 'one group per PR: a shared group drops pending applies');
   assert.match(apply, /cancel-in-progress: false/);
   assert.match(apply, /gh workflow run mergeproof-issue\.yml/, 'RETRY re-dispatches the agent');
   assert.match(apply, /--add-label needs-human/, 'exhausted retries label the PR needs-human');
+});
+
+test('pr workflow: concurrent applies both land their outcomes on the ledger', (t) => {
+  // v0.1.1 put every apply in one concurrency group: GitHub keeps one pending
+  // job per group and cancels the rest, so four verdicts at once landed two.
+  // Now applies race on the push; run the real push step for two clones of
+  // one ledger branch and check the loser re-records its outcome on top.
+  const step = runBlocks(TEMPLATES['mergeproof-pr.yml']).find((b) => b.includes('chore: record mergeproof outcomes'));
+  assert.ok(step, 'the apply job needs a ledger push step');
+  const dir = mkdtempSync(join(tmpdir(), 'mp-ledger-race-')).replace(/\\/g, '/');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const git = (cwd, ...args) => {
+    const res = runProcess('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd });
+    assert.equal(res.code, 0, res.stderr);
+    return res.stdout;
+  };
+  const outcome = (pr, status) => ({ pr, kind: 'bugfix', agent: 'a', model: 'm', status });
+  const write = (d, outcomes) =>
+    writeFileSync(join(d, 'ledger.json'), `${JSON.stringify({ schema: 'mergeproof-ledger@1', outcomes }, null, 2)}\n`);
+  git(dir, 'init', '-q', '--bare', 'remote.git');
+  git(dir, 'init', '-q', '-b', 'mergeproof-ledger', 'seed');
+  write(`${dir}/seed`, [outcome(1, 'clean'), outcome(3, 'open')]);
+  git(`${dir}/seed`, 'add', '-A');
+  git(`${dir}/seed`, 'commit', '-q', '-m', 'seed');
+  git(`${dir}/seed`, 'push', '-q', `${dir}/remote.git`, 'mergeproof-ledger');
+  for (const c of ['a', 'b']) git(dir, 'clone', '-q', '-b', 'mergeproof-ledger', `${dir}/remote.git`, c);
+  write(`${dir}/a`, [outcome(1, 'clean'), outcome(3, 'open'), outcome(10, 'open')]);
+  write(`${dir}/b`, [outcome(1, 'clean'), outcome(3, 'pending')]); // b re-proved PR 3
+
+  const push = (c) => {
+    let res;
+    try {
+      res = runProcess('bash', ['-c', step], {
+        env: { ...process.env, RUNNER_TEMP: `${dir}/tmp-${c}`, LEDGER_BRANCH: 'mergeproof-ledger', LEDGER_DIR: `${dir}/${c}` },
+      });
+    } catch {
+      return null;
+    }
+    return res;
+  };
+  mkdirSync(`${dir}/tmp-a`);
+  mkdirSync(`${dir}/tmp-b`);
+  const first = push('a');
+  if (first === null) {
+    t.skip('bash is not available');
+    return;
+  }
+  assert.equal(first.code, 0, first.stderr);
+  const second = push('b');
+  assert.equal(second.code, 0, second.stderr);
+  const remote = JSON.parse(git(dir, '--git-dir', `${dir}/remote.git`, 'show', 'mergeproof-ledger:ledger.json'));
+  assert.deepEqual(
+    remote.outcomes.map((o) => `${o.pr}:${o.status}`).sort(),
+    ['10:open', '1:clean', '3:pending'],
+  );
+
+  // A settled entry is never doubled: sync merged PR 10 meanwhile, so a late
+  // apply that still holds it as open fails instead of adding a second entry.
+  git(dir, 'clone', '-q', '-b', 'mergeproof-ledger', `${dir}/remote.git`, 'c');
+  write(`${dir}/c`, remote.outcomes.map((o) => (o.pr === 10 ? { ...o, status: 'pending' } : o)));
+  git(`${dir}/c`, 'commit', '-q', '-am', 'sync');
+  git(`${dir}/c`, 'push', '-q', 'origin', 'mergeproof-ledger');
+  git(`${dir}/a`, 'reset', '-q', '--hard', 'HEAD');
+  git(`${dir}/a`, 'pull', '-q', '--ff-only', 'origin', 'mergeproof-ledger');
+  git(`${dir}/a`, 'reset', '-q', '--hard', 'HEAD~1'); // a's view from before sync
+  write(`${dir}/a`, remote.outcomes.map((o) => (o.pr === 10 ? { ...o, model: 'n' } : o)));
+  const late = push('a');
+  assert.notEqual(late.code, 0, 'a late open entry must not land on a settled one');
+  assert.match(late.stdout, /PR 10 already has a settled outcome/);
+  const after = JSON.parse(git(dir, '--git-dir', `${dir}/remote.git`, 'show', 'mergeproof-ledger:ledger.json'));
+  assert.deepEqual(after.outcomes.filter((o) => o.pr === 10).map((o) => o.status), ['pending']);
 });
 
 test('issue workflow: gates who may start the agent', () => {
@@ -275,7 +395,8 @@ test('every action is pinned by a full commit SHA, except the agent harness and 
   // referenced by its release tag because the templates ship inside it.
   const TAG_ALLOWED = ['anthropics/claude-code-action', 'ahmed-3m/mergeproof'];
   for (const [file, text] of Object.entries(FILES)) {
-    const refs = [...text.matchAll(/uses: (\S+)/g)].map((m) => m[1]);
+    // A `uses:` key only, not the tail of `statuses:` in a permissions block.
+    const refs = [...text.matchAll(/^\s*(?:- )?uses: (\S+)/gm)].map((m) => m[1]);
     assert.ok(refs.length > 0, `${file} must use at least one action`);
     for (const ref of refs) {
       if (TAG_ALLOWED.some((a) => ref.startsWith(a))) continue;
