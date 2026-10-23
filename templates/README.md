@@ -7,7 +7,7 @@ The three templates `mergeproof init` copies into a customer's
 | Template | Flow | What it does |
 |---|---|---|
 | `mergeproof-pr.yml` | PR → outcome | After the repo's CI completes on a PR: a `context` job resolves the PR, the dispatch marker and the attempt count; a read-only `gate` job runs `check --verdict-out` (it runs PR code, so it gets no secrets and a read-only token); the `apply` job runs `apply` (writes only here), pushes the ledger, re-dispatches the agent on RETRY while attempts remain, or labels `needs-human` when they are exhausted. |
-| `mergeproof-issue.yml` | issue → PR | An issue opened by an allowlisted author or labeled `agent` by a write-capable collaborator starts the coding agent with the skill for the issue's kind, then posts the dispatch-marker comment (`github-actions[bot]` authored) that the PR workflow reads back. |
+| `mergeproof-issue.yml` | issue → PR | An issue opened by an allowlisted author or labeled `agent` by a write-capable collaborator starts the coding agent with the skill for the issue's kind, then posts the dispatch-marker comment (`github-actions[bot]` authored) that the PR workflow reads back. The agent never reads the issue from GitHub: the context step builds a trusted issue file — title and body from the author when trusted (or, for a label start, while the title and body are unedited since the label vouched), comments only from trusted authors plus `github-actions[bot]` verdicts — and that file is the agent's only issue text; the prompt forbids fetching issues, PRs, comments or web pages, and `claude_args` disallows those tools as defence in depth. |
 | `mergeproof-sync.yml` | nightly | `sync` settles the ledger and opens a human-triage issue for each newly reverted merge. |
 
 
@@ -52,7 +52,7 @@ enforce lives in `.mergeproof.json`, not in this variable.
 | Secret | Who sets it | Meaning |
 |---|---|---|
 | `MERGEPROOF_MODEL_KEY` | `mergeproof init` | API key for the model provider (passed as the agent action's `anthropic_api_key`). |
-| `MERGEPROOF_BOT_TOKEN` | `mergeproof init` | PAT of the bot user with `contents` write. The agent pushes and opens PRs with it, so they trigger CI. The apply job never sees it: it lands with the job's `github.token`, whose comments are `github-actions[bot]`-authored (the attempt count and the agent's retry prompt read only those) and whose merges branch protection already allows — the accepted trade-off is that a mergeproof merge does not itself trigger the repo's push workflows (the gate pinned the merged head's CI instead). |
+| `MERGEPROOF_BOT_TOKEN` | `mergeproof init` | PAT of the bot user that the agent pushes and opens PRs with, so they trigger CI. Make it a fine-grained PAT for this one repository with `contents: write` and `pull-requests: write` only. The apply job never sees it: it lands with the job's `github.token`, whose comments are `github-actions[bot]`-authored (the attempt count and the agent's retry prompt read only those) and whose merges branch protection already allows — the accepted trade-off is that a mergeproof merge does not itself trigger the repo's push workflows (the gate pinned the merged head's CI instead). |
 
 The gate job sees no secret at all; see [SECURITY.md](../SECURITY.md) for the
 full per-job permission table.

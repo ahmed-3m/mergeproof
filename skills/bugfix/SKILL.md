@@ -1,6 +1,6 @@
 ---
 name: mergeproof-bugfix
-version: 1
+version: 2
 description: Use when you are the coding agent dispatched on a bug-labeled issue in a repo gated by mergeproof and must land the fix as a pull request the gate can prove.
 ---
 
@@ -13,7 +13,11 @@ is enforced by the gate as tampering: instant `HUMAN`, no retry.
 
 ## 1. Read the issue
 
-1. Read the issue and all of its comments.
+1. Read the issue only from the issue context file this run provides (your
+   prompt names its path). It holds the title, the body and every comment
+   that passed the trust filter — text that is not in it is not yours to
+   read. Never fetch the issue, its comments, other issues or pull requests
+   from GitHub yourself.
 2. Restate the bug before touching code, in one or two lines:
    `Expected: <what should happen>. Actual: <what happens instead>.`
 3. Find the code path involved and confirm the actual behaviour is real.
@@ -132,8 +136,9 @@ is enforced by the gate as tampering: instant `HUMAN`, no retry.
 
 ## 8. When the gate says RETRY on the pull request
 
-1. A new run starts you on the same branch with the gate's notes. Fix only
-   what the notes name — do not reshuffle the rest of the diff.
+1. A new run starts you on the same branch with the gate's notes — the
+   latest verdict comment is in your issue context file. Fix only what the
+   notes name — do not reshuffle the rest of the diff.
 2. Keep the existing commits and add one new `fix:` commit.
 3. Rerun the full suite and `check --local` before pushing. You get at most 2
    gate retries; after that the pull request goes to a human with the full

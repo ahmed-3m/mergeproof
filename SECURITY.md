@@ -16,7 +16,8 @@ mergeproof decides whether code written by an AI agent may be merged, so it trea
 | Agent mislabels a PR to reach a trusted kind | Kind comes from changed paths only; label mismatch is tampering |
 | Compromised dependency passes every test | Deps PRs never auto-merge in v1 |
 | Running PR code with secrets | Test steps run with no secrets and a read-only token; only the merge step can write (M2 workflows) |
-| Prompt injection through issues | Only allowlisted authors or maintainer labels start an agent; bot-written issues never do (M2) |
+| An untrusted issue starts an agent at all | Only allowlisted authors or maintainer labels start an agent; bot-written issues never do (M2) |
+| Prompt injection through issue comments or an edited body | The agent never reads the issue from GitHub. Its only issue text is a file the issue workflow's context step builds: the title and body when the author is in `MERGEPROOF_AUTHORS` or a write/maintain/admin collaborator (or, for a label start, while its title and body are unedited since the last `agent` label — a later edit or rename, or the label's removal, stops the run and asks a writer to re-apply the label), comments only from trusted authors plus `github-actions[bot]` verdict comments; every other piece is dropped and counted. Each piece is fenced under a heading naming its author, so nothing can pose as someone else's text. The prompt frames the file as a task description (never as instructions that override the rules) and forbids fetching issues, PRs, comments or web pages; `claude_args` additionally disallows `WebFetch`, `WebSearch`, `gh issue view`, `gh api` and `curl` as defence in depth |
 | Flaky tests faking proof | Repeat runs on base and head; quarantine list in config |
 | PR loosens its own gate | Config is read from the base branch tip, not the PR or an older merge-base; edits to `.mergeproof.json`, `.mergeproof/**` or `.github/**` are tampering |
 | PR claims a trusted agent or model | Agent and model come from the caller's `--agent`/`--model` flags, never from the PR |
@@ -30,6 +31,15 @@ mergeproof decides whether code written by an AI agent may be merged, so it trea
 | The PR edits the gate workflow so a weaker copy gates its own CI | The PR workflow triggers on `workflow_run`, which always runs the default-branch definition — the PR's edited copy never executes; editing `.github/**` is a tamper rule anyway (`HUMAN`, no retry) |
 | A push lands after the CI run that triggered the gate, so the gate judges (and apply merges) a commit the repo's CI never covered | The workflow passes `--head <sha>` (the head whose CI completed) to both jobs; `check` stands down with `HUMAN` and no proof runs when the live head differs, and its verdict file names the CI'd commit so `apply`'s moved-head check refuses it with nothing written. The push's own CI fires a fresh gate run |
 | The agent forges its own dispatch context (issue number, skill, attempt) on the PR | The PR workflow reads only comments authored by `github-actions[bot]` — the dispatch marker for issue/skill, `Mergeproof — RETRY` comments for the attempt count — and ignores every other author; agent and model come from repo variables, never the PR |
+
+### What remains in the issue flow (prompt injection)
+
+The trusted issue file closes the untrusted channel, not the trusted one:
+
+- A trusted author — anyone in `MERGEPROOF_AUTHORS`, any write/maintain/admin collaborator, or a writer who vouches by re-applying the `agent` label — can still instruct the agent. That is what trust means here; the gate bounds what the resulting PR may do (proof, tamper rules, capped retries), not what the prompt says.
+- The agent still reads the repository's own files — code, README, docs, comments in source. Text planted in the repo itself reaches the agent the same way and is not filtered; the gate's proof and tamper rules are the bound.
+- The label vouch covers the title and body as they were when the writer added the `agent` label, and counts only when the last `agent` label came from a trusted user (triage can add labels without write access). A body edit (GitHub's `lastEditedAt`) or a title rename after that label, or the label's removal, makes it stale, and the run stops until a writer re-applies the label. Comments do not stale it — they are filtered by author instead. The check reads the issue's history through GraphQL; if that read fails, the run stops too. An author can therefore force a retry of a label-vouched issue back through a writer by editing it; that is a nuisance (fail closed), not an injection.
+- The agent's `MERGEPROOF_BOT_TOKEN` can push and open PRs. Scope it as a fine-grained PAT for this one repository with `contents: write` and `pull-requests: write` only — no workflows, no admin, no org scope — so even a fully injected agent cannot do more than propose a PR the gate still has to prove.
 
 ## Workflow permissions
 
