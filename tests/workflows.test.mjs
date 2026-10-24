@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { runProcess } from '../src/adapters/process.mjs';
 
 const ACTION = readFileSync(resolve('action.yml'), 'utf8');
@@ -636,8 +636,41 @@ test('issue workflow: MERGEPROOF_HARNESS picks exactly one agent step, and agy n
   const install = steps.find((s) => s.name === 'Install the pinned agy binary');
   const agy = steps.find((s) => s.name === 'Run the coding agent on the issue (agy)');
   assert.ok(claude && install && agy, 'the claude step, the agy install step and the agy run step');
-  assert.match(claude.text, /steps\.ctx\.outputs\.harness == 'claude'/);
-  for (const s of [install, agy]) assert.match(s.text, /if: success\(\) && steps\.ctx\.outputs\.stopped != 'true' && steps\.ctx\.outputs\.harness == 'agy'/);
+  // The claude path runs inside the agent job, gated on the ctx outputs.
+  assert.match(claude.text, /if: success\(\) && steps\.ctx\.outputs\.stopped != 'true' && steps\.ctx\.outputs\.harness == 'claude'/);
+  // The agy path runs in its own job, gated once at the job level.
+  for (const name of ['agy-run', 'agy-publish']) {
+    assert.ok(ISSUE_JOBS[name], `the agy path needs its ${name} job`);
+    assert.match(ISSUE_JOBS[name], /^ {4}if: vars\.MERGEPROOF_MODE != 'off' && needs\.agent\.outputs\.harness == 'agy' && needs\.agent\.outputs\.stopped != 'true'$/m, `${name} runs only for a live agy run`);
+  }
+  assert.match(ISSUE_JOBS['agy-run'], /^ {4}needs: agent$/m);
+  assert.match(ISSUE_JOBS['agy-publish'], /^ {4}needs: \[agent, agy-run\]$/m);
+  // All three jobs share the per-issue concurrency group, so two runs for
+  // one issue never interleave around the publish push.
+  for (const name of ['agent', 'agy-run', 'agy-publish']) {
+    assert.match(ISSUE_JOBS[name], /group: mergeproof-issue-\$\{\{ github\.event\.issue\.number \|\| github\.event\.inputs\.issue \}\}/, `${name} sits in the per-issue concurrency group`);
+    assert.match(ISSUE_JOBS[name], /cancel-in-progress: false/);
+  }
+  // The agent job exposes the ctx outputs and uploads the trusted issue
+  // file for the agy jobs only.
+  for (const out of ['stopped', 'harness', 'kind', 'skill', 'issue-number', 'pr-number', 'pr-head-ref', 'retry-note']) {
+    assert.match(ISSUE_JOBS.agent, new RegExp(` {6}${out}: \\$\\{\\{ steps\\.ctx\\.outputs\\.${out} \\}\\}`), `the ${out} output must cross the job boundary`);
+  }
+  const upload = steps.find((s) => s.name === 'Upload the trusted issue file for the agy jobs');
+  assert.ok(upload, 'the agent job uploads the trusted issue file for the agy jobs');
+  assert.match(upload.text, /if: success\(\) && steps\.ctx\.outputs\.stopped != 'true' && steps\.ctx\.outputs\.harness == 'agy'/);
+  assert.match(upload.text, /retention-days: 1/);
+  // Each path keeps its own marker step; agy-run never posts one.
+  const markers = steps.filter((s) => s.name === "Find the agent's PR and post the dispatch marker");
+  assert.equal(markers.length, 2, 'one marker step per path');
+  assert.match(ISSUE_JOBS.agent, /Find the agent's PR and post the dispatch marker\n {8}if: success\(\) && steps\.ctx\.outputs\.stopped != 'true' && steps\.ctx\.outputs\.harness == 'claude'/, "the agent job's marker runs for claude only");
+  assert.ok(ISSUE_JOBS['agy-publish'].includes("Find the agent's PR and post the dispatch marker"));
+  assert.ok(!ISSUE_JOBS['agy-run'].includes('dispatch marker'), 'agy-run never posts the marker');
+  // On a retry the ctx step resolves the PR's head branch (with the agent
+  // job's own token); agy-run starts from it.
+  assert.match(ctx, /pr_branch="\$\(gh pr view "\$PR_NUMBER" --repo "\$REPO" --json headRefName --jq \.headRefName\)"/);
+  assert.match(ctx, /echo "pr-head-ref=\$pr_branch"/);
+  assert.match(ISSUE_JOBS['agy-run'], /ref: \$\{\{ needs\.agent\.outputs\.pr-head-ref \}\}/);
 });
 
 test('issue workflow: agy is installed from a pinned SHA-512, never through install.sh', () => {
@@ -691,22 +724,376 @@ test('issue workflow: the agy install step refuses a download that does not matc
   assert.match(readFileSync(join(dir, 'github_path'), 'utf8'), /\/tmp\/agy/);
 });
 
-test('issue workflow: the agy step runs the same prompt headless, with secrets in env only', () => {
+test('issue workflow: the agy prompt is the claude prompt with only the handoff substitutions', () => {
   const issue = TEMPLATES['mergeproof-issue.yml'].replace(/\r\n/g, '\n');
   const agy = issueSteps().find((s) => s.name === 'Run the coding agent on the issue (agy)');
-  // The two harnesses must not drift: the agy prompt is the claude prompt.
+  assert.ok(agy, 'the agy run step');
+  // The two harnesses must not drift: the agy prompt is the claude prompt
+  // with exactly the two handoff substitutions — no GitHub access, the
+  // PR title/body files instead of opening the PR, the stop-comment file
+  // instead of commenting on the issue — and nothing else.
   const claudePrompt = / {10}prompt: \|\n([\s\S]*?)\n(?: {10}# | {10}claude_args:)/.exec(issue)?.[1];
   const agyPrompt = / {10}AGENT_PROMPT: \|\n([\s\S]*?)\n {8}run: \|/.exec(agy.text)?.[1];
-  assert.ok(claudePrompt && agyPrompt);
-  assert.equal(agyPrompt, claudePrompt);
+  assert.ok(claudePrompt && agyPrompt, 'both prompts must exist');
+  const openPr = 'and open the pull request exactly as the playbook says.';
+  const handoffPr = 'and commit your finished work on the branch the playbook names. You have no GitHub access and must not push: instead of opening the pull request, write its title to $MERGEPROOF_HANDOFF/pr-title.txt and its body (the playbook\'s report) to $MERGEPROOF_HANDOFF/pr-body.md — on a retry, add only the new commit and write neither file.';
+  const comment = 'comment your questions or findings on issue #${{ steps.ctx.outputs.issue-number }}';
+  const handoffStop = 'write your questions or findings to $MERGEPROOF_HANDOFF/stop-comment.md, committing whatever branch exists';
+  assert.ok(claudePrompt.includes(openPr), 'the claude prompt still opens the PR (the anchor of the first substitution)');
+  assert.ok(claudePrompt.includes(comment), 'the claude prompt still comments on the issue (the anchor of the second substitution)');
+  assert.equal(agyPrompt, claudePrompt.replace(openPr, () => handoffPr).replace(comment, () => handoffStop));
+  // The substituted prompt names the handoff files and the access ban.
+  assert.match(agyPrompt, /\$MERGEPROOF_HANDOFF\/pr-title\.txt/);
+  assert.match(agyPrompt, /\$MERGEPROOF_HANDOFF\/pr-body\.md/);
+  assert.match(agyPrompt, /\$MERGEPROOF_HANDOFF\/stop-comment\.md/);
+  assert.match(agyPrompt, /no GitHub access and must not push/);
+  // The run itself is unchanged: headless, model errors surfaced with a
+  // hint, commits authored by the bot login.
   const run = runBlocks(agy.text)[0];
   assert.doesNotMatch(run, /\$\{\{/, 'no expression inside run: (script injection)');
   assert.match(run, /agy -p "\$AGENT_PROMPT" --model "\$MODEL" --dangerously-skip-permissions --output-format text/);
   assert.match(run, /\[ "\$code" -eq 3 \] \|\| grep -q 'AGY_ERROR'/, 'model errors (exit 3 / AGY_ERROR) fail the step with a hint');
+  assert.match(run, /git config user\.name "\$BOT_LOGIN"/, 'commits are authored by the bot login');
+  assert.match(run, /git config user\.email "\$BOT_LOGIN@users\.noreply\.github\.com"/);
   assert.match(agy.text, /GEMINI_API_KEY: \$\{\{ secrets\.MERGEPROOF_MODEL_KEY \}\}/);
-  assert.match(agy.text, /GH_TOKEN: \$\{\{ secrets\.MERGEPROOF_BOT_TOKEN \}\}/);
-  assert.match(agy.text, /GIT_CONFIG_VALUE_1: '!gh auth git-credential'/);
   assert.match(agy.text, /AGY_CLI_DISABLE_AUTO_UPDATE: '1'/);
+});
+
+test('issue workflow: the agy-run job holds no GitHub credential at all', () => {
+  const run = ISSUE_JOBS['agy-run'];
+  assert.ok(run, 'the agy path runs in its own job');
+  // Read-only is the whole permissions block; the model key is the only
+  // secret the job ever sees.
+  assert.deepEqual(
+    [...run.matchAll(/^ {6}([\w-]+): (read|write)$/gm)].map((m) => `${m[1]}: ${m[2]}`),
+    ['contents: read'],
+    'contents: read is the whole permissions block',
+  );
+  assert.equal([...run.matchAll(/secrets\./g)].length, 1, 'exactly one secret reference in agy-run');
+  assert.match(run, /GEMINI_API_KEY: \$\{\{ secrets\.MERGEPROOF_MODEL_KEY \}\}/);
+  // No token, no credential helper, no gh call: a prompt-injected agy has
+  // nothing to exfiltrate and no later credentialed step to hijack — the
+  // credentialed work runs in another job.
+  assert.doesNotMatch(run, /GH_TOKEN/, 'no GH_TOKEN anywhere in agy-run');
+  assert.doesNotMatch(run, /MERGEPROOF_BOT_TOKEN/, 'the bot token never enters the agy job');
+  assert.doesNotMatch(run, /github\.token/, 'no default token either');
+  assert.doesNotMatch(run, /credential\.helper/, 'no git credential helper (persist-credentials: false is the only credential line)');
+  for (const block of runBlocks(run)) {
+    assert.doesNotMatch(block, /(^|\s)gh(\s|\()/, 'no gh call in any agy-run script');
+  }
+  assert.match(run, /persist-credentials: false/, 'the checkout keeps no credential');
+  assert.match(run, /ref: \$\{\{ needs\.agent\.outputs\.pr-head-ref \}\}/, 'a retry starts on the PR head branch the agent job resolved');
+  // The output leaves as one short-retention artifact: the bundle of the
+  // agent/* branch plus the handoff files.
+  assert.match(run, /git bundle create "\$out\/agent\.bundle" --branches='agent\/\*'/);
+  assert.match(run, /name: mergeproof-agy-output/);
+  assert.match(run, /retention-days: 1/);
+  assert.match(run, /actions\/upload-artifact@[0-9a-f]{40}/);
+  // The trusted issue file comes back from the agent job the same way.
+  assert.match(run, /actions\/download-artifact@[0-9a-f]{40}/);
+  assert.match(run, /name: mergeproof-issue-context/);
+});
+
+test('issue workflow: agy-publish never runs agent or repo code, and the bot token is step-scoped', () => {
+  const pub = ISSUE_JOBS['agy-publish'];
+  assert.ok(pub, 'the agy path needs its publish job');
+  assert.deepEqual(
+    [...pub.matchAll(/^ {6}([\w-]+): (read|write)$/gm)].map((m) => `${m[1]}: ${m[2]}`).sort(),
+    ['contents: read', 'issues: write', 'pull-requests: write'],
+  );
+  assert.match(pub, /ref: \$\{\{ github\.event\.repository\.default_branch \}\}/, 'the default branch, not anything from the artifact');
+  assert.match(pub, /persist-credentials: false/);
+  assert.match(pub, /actions\/download-artifact@[0-9a-f]{40}/);
+  assert.match(pub, /name: mergeproof-agy-output/);
+  // It relays and pushes; it never executes the agent, the repo's tooling
+  // or anything from the bundle.
+  assert.doesNotMatch(pub, /Install the pinned agy binary/, 'the agy install step never exists here');
+  for (const block of runBlocks(pub)) {
+    assert.doesNotMatch(block, /agy -p/, 'agy itself never runs in the publish job');
+    assert.doesNotMatch(block, /\b(?:npm|npx|node)\b/, 'no package manager or node in the publish job');
+  }
+  assert.doesNotMatch(pub, /GEMINI_API_KEY/, 'no model key in the publish job');
+  const steps = pub.split(/\n(?= {6}- )/).map((text) => ({ name: / {6}- name: (.*)/.exec(text)?.[1] ?? '', text }));
+  // The bot token appears only in the steps that push and comment as the bot.
+  assert.deepEqual(
+    steps.filter((s) => s.text.includes('secrets.MERGEPROOF_BOT_TOKEN')).map((s) => s.name).sort(),
+    ["Post the agent's stop comment on the issue", 'Push the branch and open the pull request'],
+  );
+  assert.match(steps.find((s) => s.name === 'Push the branch and open the pull request').text, /GIT_CONFIG_VALUE_1: '!gh auth git-credential'/, 'the push authenticates through gh, like the old agy step');
+  // The validate step sees no token at all; its outputs gate every step
+  // that can write.
+  const validate = steps.find((s) => s.name === 'Validate the agent output');
+  assert.ok(validate, 'the publish job needs its validate step');
+  assert.doesNotMatch(validate.text, /GH_TOKEN|MERGEPROOF_BOT_TOKEN/);
+  for (const name of ['Push the branch and open the pull request', "Post the agent's stop comment on the issue", "Find the agent's PR and post the dispatch marker"]) {
+    assert.match(steps.find((s) => s.name === name).text, /if: success\(\) && steps\.validate\.outputs\.ok == 'true'/, `${name} is gated on validation`);
+  }
+  // The marker is the agent job's marker script verbatim, still posted
+  // with the default token so its author is github-actions[bot].
+  const marker = runBlocks(pub).find((blk) => blk.includes('mergeproof-dispatch'));
+  const agentMarker = runBlocks(ISSUE_JOBS.agent).find((blk) => blk.includes('mergeproof-dispatch'));
+  assert.ok(marker && agentMarker);
+  assert.equal(marker, agentMarker, 'the publish marker script is the agent job marker, verbatim');
+  assert.match(steps.find((s) => s.name === "Find the agent's PR and post the dispatch marker").text, /GH_TOKEN: \$\{\{ github\.token \}\}/);
+  // A refused output tells the issue, labels it and fails the run.
+  const refuse = steps.find((s) => s.name === 'Refuse an agy output that failed validation');
+  assert.ok(refuse, 'the publish job needs its refusal step');
+  assert.match(refuse.text, /if: success\(\) && steps\.validate\.outputs\.ok == 'false'/);
+  assert.match(refuse.text, /refused to publish/);
+  assert.match(refuse.text, /--add-label needs-human/);
+  assert.match(refuse.text, /::error::/);
+  assert.match(refuse.text, /exit 1/);
+  assert.match(refuse.text, /GH_TOKEN: \$\{\{ github\.token \}\}/);
+});
+
+test('issue workflow: agy-publish validates the bundle before anything is pushed (real bash, real git)', (t) => {
+  // Run the publish job's own validate, push, stop-comment and refusal
+  // scripts against real git repositories: a bare "origin" stands in for
+  // GitHub (nothing needs a network), and gh is a shim that records its
+  // arguments. The composition mirrors the workflow: push only when
+  // validation says ok with a branch, refuse (and fail the run) when it
+  // does not, relay the stop comment either way.
+  const pub = ISSUE_JOBS['agy-publish'];
+  const validate = runBlocks(pub).find((blk) => blk.includes('git bundle verify'));
+  const push = runBlocks(pub).find((blk) => blk.includes('git push'));
+  const stop = runBlocks(pub).find((blk) => blk.includes('stop-comment.md') && blk.includes('issue comment'));
+  const refuse = runBlocks(pub).find((blk) => blk.includes('refused to publish'));
+  assert.ok(validate && push && stop && refuse, 'publish needs its validate, push, stop-comment and refusal scripts');
+
+  const dir = mkdtempSync(join(tmpdir(), 'mp-agy-publish-')).replace(/\\/g, '/');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  // GNU tar/git on Windows read `C:/...` as a remote host; bash gets the MSYS form.
+  const b = dir.replace(/^([A-Za-z]):/, (_, d) => `/${d.toLowerCase()}`);
+  const git = (cwd, ...args) => {
+    const res = runProcess('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd });
+    assert.equal(res.code, 0, res.stderr);
+    return res.stdout;
+  };
+  const write = (rel, content) => {
+    mkdirSync(dirname(join(dir, rel)), { recursive: true });
+    writeFileSync(join(dir, rel), content);
+  };
+  const remoteAgentRefs = () => git(dir, '--git-dir', `${dir}/remote.git`, 'for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads/agent');
+
+  // A fresh world per scenario: a bare remote with a main branch, the
+  // default-branch checkout the scripts run in, and a clone the "agent"
+  // commits in.
+  const fresh = () => {
+    for (const p of ['remote.git', 'checkout', 'agent', 'other', 'out']) rmSync(join(dir, p), { recursive: true, force: true });
+    git(dir, 'init', '-q', '--bare', '-b', 'main', 'remote.git');
+    git(dir, 'init', '-q', '-b', 'main', 'seed');
+    write('seed/a.txt', 'base\n');
+    git(`${dir}/seed`, 'add', '-A');
+    git(`${dir}/seed`, 'commit', '-q', '-m', 'base');
+    git(`${dir}/seed`, 'push', '-q', `${dir}/remote.git`, 'main');
+    git(dir, 'clone', '-q', `${dir}/remote.git`, 'checkout');
+    rmSync(join(dir, 'seed'), { recursive: true, force: true });
+  };
+  const agentStart = (branch) => {
+    git(dir, 'clone', '-q', `${dir}/remote.git`, 'agent');
+    git(`${dir}/agent`, 'checkout', '-q', '-b', branch);
+  };
+  const agentCommit = (file, content, msg) => {
+    write(`agent/${file}`, content);
+    git(`${dir}/agent`, 'add', '-A');
+    git(`${dir}/agent`, 'commit', '-q', '-m', msg);
+  };
+  const goodSetup = () => {
+    agentStart('agent/feature-5-fix-crash');
+    agentCommit('src/fix.js', 'fix;\n', 'fix');
+    return { newTip: git(`${dir}/agent`, 'rev-parse', 'HEAD').trim() };
+  };
+  // The refusal outcome: ok=false from the validate script, the refusal
+  // script's exit 1, and the remote byte-for-byte unchanged.
+  const refused = (message) => (res, o) => {
+    assert.equal(res.code, 1, res.stdout + res.stderr);
+    assert.match(o.outs, /^ok=false$/m);
+    assert.ok(!/^branch=/m.test(o.outs), 'no branch output on refusal');
+    assert.equal(o.remote, o.before, 'nothing is pushed');
+    assert.match(res.stdout, message);
+    assert.match(o.gh, /issue comment 5 --repo o\/r/, 'the issue is told about the refusal');
+    assert.match(o.gh, /issue edit 5 --repo o\/r --add-label needs-human/);
+  };
+
+  const scenarios = [
+    {
+      name: 'a good bundle passes, is pushed and opens the PR',
+      files: { 'pr-title.txt': 'feat: fix the crash on empty payloads\n', 'pr-body.md': '## Report\n\nself-review pass\n' },
+      setup: goodSetup,
+      check(res, o, extra) {
+        assert.equal(res.code, 0, res.stdout + res.stderr);
+        assert.match(o.outs, /^ok=true$/m);
+        assert.match(o.outs, /^branch=agent\/feature-5-fix-crash$/m);
+        assert.ok(o.remote.includes(`refs/heads/agent/feature-5-fix-crash ${extra.newTip}`), 'the validated branch is pushed');
+        assert.match(o.gh, /pr create --repo o\/r --head agent\/feature-5-fix-crash --base main --title feat: fix the crash on empty payloads --body-file \S+\/out\/pr-body\.md/, 'gh gets the title as one variable and the body as a file');
+      },
+    },
+    {
+      name: 'a bundle with two branches is refused',
+      setup() {
+        goodSetup();
+        git(`${dir}/agent`, 'checkout', '-q', '-b', 'agent/feature-5-extra');
+        agentCommit('src/extra.js', 'x;\n', 'extra');
+      },
+      check: refused(/exactly one branch/),
+    },
+    {
+      name: 'a branch name outside the run kind is refused',
+      setup() {
+        agentStart('agent/bugfix-5-fix-crash'); // this run's kind is feature
+        agentCommit('src/fix.js', 'fix;\n', 'fix');
+      },
+      check: refused(/does not match agent\/feature-5-<slug>/),
+    },
+    {
+      name: 'a branch tip that does not descend from main is refused',
+      bundleFrom: 'other',
+      setup() {
+        git(dir, 'init', '-q', '-b', 'main', 'other');
+        write('other/o.txt', 'unrelated root\n');
+        git(`${dir}/other`, 'add', '-A');
+        git(`${dir}/other`, 'commit', '-q', '-m', 'other');
+        git(`${dir}/other`, 'checkout', '-q', '-b', 'agent/feature-5-fix-crash');
+        git(`${dir}/other`, 'commit', '-q', '--allow-empty', '-m', 'unrelated');
+      },
+      check: refused(/does not descend from the main tip/),
+    },
+    {
+      name: 'a .github change is refused',
+      setup() {
+        goodSetup();
+        agentCommit('.github/workflows/evil.yml', 'on: push\n', 'evil');
+      },
+      check: refused(/bot token must never push/),
+    },
+    {
+      name: 'an over-long title is refused',
+      files: { 'pr-title.txt': `${'x'.repeat(201)}\n` },
+      setup: goodSetup,
+      check: refused(/longer than 200 characters/),
+    },
+    {
+      name: 'a multi-line title is refused',
+      files: { 'pr-title.txt': 'one\ntwo\n' },
+      setup: goodSetup,
+      check: refused(/single line/),
+    },
+    {
+      name: 'a retry fast-forwards the pull request head and pushes',
+      prNumber: '12',
+      prHeadRef: 'agent/feature-5-fix-crash',
+      setup() {
+        goodSetup();
+        git(`${dir}/agent`, 'push', '-q', `${dir}/remote.git`, 'refs/heads/agent/feature-5-fix-crash:refs/heads/agent/feature-5-fix-crash');
+        const prHeadSha = git(`${dir}/agent`, 'rev-parse', 'HEAD').trim();
+        agentCommit('src/fix2.js', 'fix2;\n', 'retry fix');
+        const newTip = git(`${dir}/agent`, 'rev-parse', 'HEAD').trim();
+        return { prHeadSha, newTip };
+      },
+      check(res, o, extra) {
+        assert.equal(res.code, 0, res.stdout + res.stderr);
+        assert.match(o.outs, /^ok=true$/m);
+        assert.ok(o.remote.includes(`refs/heads/agent/feature-5-fix-crash ${extra.newTip}`), 'the fast-forward lands');
+        assert.equal(o.gh, '', 'a retry pushes only; gh is never called');
+      },
+    },
+    {
+      name: 'a retry that rewrites the head is refused',
+      prNumber: '12',
+      prHeadRef: 'agent/feature-5-fix-crash',
+      setup() {
+        goodSetup();
+        git(`${dir}/agent`, 'push', '-q', `${dir}/remote.git`, 'refs/heads/agent/feature-5-fix-crash:refs/heads/agent/feature-5-fix-crash');
+        const prHeadSha = git(`${dir}/agent`, 'rev-parse', 'HEAD').trim();
+        git(`${dir}/agent`, 'commit', '-q', '--amend', '-m', 'rewritten');
+        return { prHeadSha };
+      },
+      check: refused(/not a fast-forward/),
+    },
+    {
+      name: 'a stop comment without a branch validates, posts and pushes nothing',
+      files: { 'stop-comment.md': 'Questions: which payload shapes?\n' },
+      bundleFrom: null,
+      setup() {},
+      check(res, o) {
+        assert.equal(res.code, 0, res.stdout + res.stderr);
+        assert.match(o.outs, /^ok=true$/m);
+        assert.match(o.outs, /^branch=$/m);
+        assert.equal(o.remote, '', 'nothing is pushed');
+        assert.match(o.gh, /issue comment 5 --repo o\/r --body-file \S+\/out\/stop-comment\.md/, 'the stop comment is relayed from the file');
+      },
+    },
+  ];
+
+  const scriptPath = join(dir, 'scenario.sh');
+  const outputPath = join(dir, 'github_output');
+  const ghCallsPath = join(dir, 'gh_calls');
+  for (const s of scenarios) {
+    fresh();
+    const extra = s.setup() ?? {};
+    rmSync(join(dir, 'out'), { recursive: true, force: true });
+    mkdirSync(join(dir, 'out'), { recursive: true });
+    for (const [name, content] of Object.entries(s.files ?? {})) write(`out/${name}`, content);
+    if (s.bundleFrom !== null) {
+      git(`${dir}/${s.bundleFrom ?? 'agent'}`, 'bundle', 'create', `${dir}/out/agent.bundle`, '--branches=agent/*');
+    }
+    rmSync(outputPath, { force: true });
+    rmSync(ghCallsPath, { force: true });
+    // The composition mirrors the workflow's own gating; the validate
+    // script runs in a subshell because its fail() exits 0 (it is a whole
+    // step in the workflow, and the refusal step is what fails the run).
+    writeFileSync(
+      scriptPath,
+      [
+        'set -euo pipefail',
+        'gh() { printf \'%s\\n\' "$*" >> "$GH_CALLS"; }',
+        '(',
+        validate.replace(/\r/g, ''),
+        ')',
+        'branch="$(sed -n \'s/^branch=//p\' "$GITHUB_OUTPUT" || true)"',
+        'ok="$(sed -n \'s/^ok=//p\' "$GITHUB_OUTPUT" || true)"',
+        'if [ "$ok" = true ] && [ -n "$branch" ]; then',
+        '  export BRANCH="$branch"',
+        push.replace(/\r/g, ''),
+        'elif [ "$ok" = false ]; then',
+        refuse.replace(/\r/g, ''),
+        'fi',
+        'if [ "$ok" = true ]; then',
+        stop.replace(/\r/g, ''),
+        'fi',
+        '',
+      ].join('\n'),
+    );
+    const before = remoteAgentRefs();
+    let res;
+    try {
+      res = runProcess('bash', [scriptPath], {
+        cwd: `${dir}/checkout`,
+        env: {
+          ...process.env,
+          GITHUB_OUTPUT: `${b}/github_output`,
+          AGY_OUT: `${b}/out`,
+          KIND: 'feature',
+          ISSUE_NUMBER: '5',
+          DEFAULT_BRANCH: 'main',
+          REPO: 'o/r',
+          GH_CALLS: `${b}/gh_calls`,
+          PR_NUMBER: s.prNumber ?? '',
+          PR_HEAD_REF: s.prHeadRef ?? '',
+          PR_HEAD_SHA: extra.prHeadSha ?? '',
+        },
+      });
+    } catch {
+      t.skip('bash is not available');
+      return;
+    }
+    s.check(res, {
+      outs: readFileSync(outputPath, 'utf8'),
+      before,
+      remote: remoteAgentRefs(),
+      gh: existsSync(ghCallsPath) ? readFileSync(ghCallsPath, 'utf8') : '',
+    }, extra);
+  }
 });
 
 test('sync workflow: nightly, on the shared ledger concurrency group', () => {
