@@ -13,8 +13,8 @@
 # Two harnesses. `claude` (the default) runs claude-code-action inside the
 # `agent` job. `agy` splits the run across three jobs, because headless agy
 # has no tool deny-list and must never share a runner with a GitHub
-# credential: `agent` builds the trusted issue file, `agy-run` runs agy with
-# only the model key in its environment, and `agy-publish` validates agy's
+# credential: `agent` builds the trusted issue file, `agy-run` runs agy in a
+# digest-pinned container with only the model key, and `agy-publish` validates agy's
 # bundle and handoff files as untrusted data before the only push happens.
 #
 # `mergeproof init` installs this file together with the skills under
@@ -45,6 +45,16 @@ permissions:
   pull-requests: write
   actions: read
 
+# One run per issue at a time, for the whole run: a group on each job would
+# only stop two copies of the same job overlapping, so a second run could
+# still interleave with the first between jobs (and GitHub may drop a
+# queued job of either). A label event for any label but `agent` can never
+# start the agent, so it gets a group of its own and never queues in front
+# of a real run or pushes one out: GitHub keeps one pending run per group.
+concurrency:
+  group: ${{ (github.event_name == 'workflow_dispatch' || github.event.action == 'opened' || github.event.label.name == 'agent') && format('mergeproof-issue-{0}', github.event.issue.number || github.event.inputs.issue) || format('mergeproof-issue-noop-{0}', github.run_id) }}
+  cancel-in-progress: false
+
 jobs:
   agent:
     # Kill switch first. Prompt-injection guard: a Bot never starts a run;
@@ -54,9 +64,6 @@ jobs:
     # collaborator. A dispatch (a human, or the PR workflow's retry) always
     # runs.
     if: vars.MERGEPROOF_MODE != 'off' && (github.event_name == 'workflow_dispatch' || (github.event.issue.user.type != 'Bot' && ((github.event.action == 'opened' && vars.MERGEPROOF_AUTHORS != '' && contains(format(',{0},', vars.MERGEPROOF_AUTHORS), format(',{0},', github.event.issue.user.login))) || (github.event.action == 'labeled' && github.event.label.name == 'agent' && github.event.sender.type != 'Bot'))))
-    concurrency:
-      group: mergeproof-issue-${{ github.event.issue.number || github.event.inputs.issue }}
-      cancel-in-progress: false
     runs-on: ubuntu-latest
     outputs:
       stopped: ${{ steps.ctx.outputs.stopped }}
@@ -94,6 +101,7 @@ jobs:
           DAILY_LIMIT: ${{ vars.MERGEPROOF_DAILY_LIMIT || '10' }}
           HARNESS: ${{ vars.MERGEPROOF_HARNESS || 'claude' }}
           AGENT: ${{ vars.MERGEPROOF_AGENT || '' }}
+          BOT_LOGIN: ${{ vars.MERGEPROOF_BOT_LOGIN || '' }}
         run: |
           set -euo pipefail
 
@@ -168,7 +176,7 @@ jobs:
           # --- agent issue file: begin (tests/workflows.test.mjs runs this
           # section in bash against a fake gh; keep it self-contained: only
           # these env vars — REPO, ISSUE_NUMBER, PR_NUMBER, AUTHORS,
-          # RUNNER_TEMP — and gh) ---
+          # BOT_LOGIN, RUNNER_TEMP — and gh) ---
           #
           # Prompt injection: anyone can comment on a public issue, and an
           # untrusted author can edit their issue after a writer labels it.
@@ -255,7 +263,9 @@ jobs:
           # Comments: only from authors the same check trusts; every other
           # comment is dropped and counted. github-actions[bot] is dropped
           # too: any workflow in the repo can post as it, and the gate's
-          # verdicts land on the pull request, read below. Bodies move
+          # verdicts land on the pull request, read below. So is the bot
+          # login: its comments are the agent's own output (an agy stop
+          # comment), never maintainer instructions. Bodies move
           # between jq and bash base64-encoded, so nothing in a body can
           # forge a login field or a line of its own.
           omitted=0
@@ -263,7 +273,9 @@ jobs:
           while read -r c_login c_b64; do
             [ -n "$c_login" ] || continue
             c_body="$(printf '%s' "$c_b64" | base64 -d)"
-            if [ "$c_login" != 'github-actions[bot]' ] && trusted "$c_login"; then
+            if [ "$c_login" != 'github-actions[bot]' ] \
+              && [ "${c_login,,}" != "${BOT_LOGIN,,}" ] \
+              && trusted "$c_login"; then
               emit "Comment — by $c_login (trusted)" "$c_body"
             else
               omitted=$((omitted + 1))
@@ -300,7 +312,12 @@ jobs:
           # with. A new run starts from the default branch.
           pr_branch="$DEFAULT_BRANCH"
           if [ -n "$PR_NUMBER" ]; then
-            pr_branch="$(gh pr view "$PR_NUMBER" --repo "$REPO" --json headRefName --jq .headRefName)"
+            pr_head="$(gh pr view "$PR_NUMBER" --repo "$REPO" --json headRefName,isCrossRepository --jq '[.headRefName, (.isCrossRepository | tostring)] | join(" ")')"
+            read -r pr_branch pr_cross <<< "$pr_head"
+            if [ "$pr_cross" != 'false' ]; then
+              echo "::error::pull request #$PR_NUMBER comes from a fork — not starting the retry"
+              exit 1
+            fi
           fi
 
           {
@@ -404,22 +421,18 @@ jobs:
   #
   # agy runs with --dangerously-skip-permissions and has no tool deny-list,
   # so this job holds no GitHub write credential: no bot token, no helper,
-  # no gh call, a contents: read job token. A prompt-injected agy can still
-  # leak the model key and reach what any code on a runner can (such as the
-  # Actions cache), but it cannot push, comment or open a PR; it commits locally and hands the branch and
-  # its handoff files to the publish job as an artifact. Moving the push
-  # into a later step HERE would not work: a later step in the same job
-  # inherits whatever agy wrote to $GITHUB_ENV / $GITHUB_PATH (a fake gh or
-  # git on PATH, LD_PRELOAD, GIT_* config), so the push has to happen in a
-  # different job on a fresh runner.
+  # no gh call, a contents: read job token. agy itself runs in a container
+  # on a copy of the checkout, so it cannot reach the runner's Actions
+  # runtime token (and the Actions cache behind it), the runner's checkout
+  # or $GITHUB_ENV / $GITHUB_PATH. A prompt-injected agy can still leak the
+  # model key (the container has network: it needs the model API and npm),
+  # but it cannot push, comment or open a PR; it commits locally and hands
+  # the branch and its handoff files to the publish job as an artifact. The
+  # push still happens in a different job on a fresh runner: nothing in
+  # this job, container or not, is trusted to hold a write credential.
   agy-run:
     if: vars.MERGEPROOF_MODE != 'off' && needs.agent.outputs.harness == 'agy' && needs.agent.outputs.stopped != 'true'
     needs: agent
-    # Same per-issue group as the agent job: two runs for one issue never
-    # interleave, in particular not around the publish push.
-    concurrency:
-      group: mergeproof-issue-${{ github.event.issue.number || github.event.inputs.issue }}
-      cancel-in-progress: false
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -490,8 +503,28 @@ jobs:
           tar -xzf "$dir/agy.tar.gz" -C "$dir" antigravity
           mv "$dir/antigravity" "$dir/agy"
           chmod +x "$dir/agy"
-          echo "$dir" >> "$GITHUB_PATH"
           "$dir/agy" --version
+
+      # agy runs in a container, not on the runner: code on the runner itself
+      # can reach the job's Actions runtime token (and through it the
+      # default branch's Actions cache), and agy is untrusted code here. The
+      # image is pinned by digest like the actions; it needs node and git
+      # because the playbook runs the repo's tests and `mergeproof check
+      # --local`. A repo whose tests need more can set MERGEPROOF_AGY_IMAGE
+      # to another image, pinned by digest.
+      - name: Pull the pinned agy container image
+        id: image
+        env:
+          # node:22-trixie, checked 2026-10-24 (Docker Hub and the registry agree).
+          AGY_IMAGE: ${{ vars.MERGEPROOF_AGY_IMAGE || 'node:22-trixie@sha256:77d0c7953e80648137a237496c8edbcb3a14bedc5c5298b93a6d0dfa6c3e1271' }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$AGY_IMAGE" | grep -Eq '@sha256:[0-9a-f]{64}$'; then
+            echo "::error::MERGEPROOF_AGY_IMAGE must be pinned by digest (<image>@sha256:<64 hex>), got '$AGY_IMAGE'"
+            exit 1
+          fi
+          docker pull -q "$AGY_IMAGE"
+          echo "image=$AGY_IMAGE" >> "$GITHUB_OUTPUT"
 
       # Headless agy denies file writes unless its permission prompts are
       # off (--dangerously-skip-permissions), and it has no tool deny-list
@@ -501,8 +534,16 @@ jobs:
       # secret in this step is the model key. Everything reaches the step
       # through env (never ${{ }} inside run:), and the prompt is the
       # claude prompt with exactly the handoff substitutions (a test checks).
+      #
+      # The container sees a copy of the checkout, the trusted issue file
+      # (read-only, at the path the prompt names), the handoff directory and
+      # the agy binary (read-only) — no runner directory, no Docker socket,
+      # no capabilities — and only GEMINI_API_KEY plus the non-secret
+      # settings below. It runs as the runner's user, so the files it
+      # leaves stay readable.
       - name: Run the coding agent on the issue (agy)
         env:
+          AGY_IMAGE: ${{ steps.image.outputs.image }}
           GEMINI_API_KEY: ${{ secrets.MERGEPROOF_MODEL_KEY }}
           # The pinned binary is the one that runs; no background self-update.
           AGY_CLI_DISABLE_AUTO_UPDATE: '1'
@@ -524,13 +565,28 @@ jobs:
             When the playbook says to stop, write your questions or findings to $MERGEPROOF_HANDOFF/stop-comment.md, committing whatever branch exists and end the run. Never edit an existing test file, never touch .mergeproof.json, .mergeproof/ or .github/, and never add labels yourself.
         run: |
           set -euo pipefail
+          # agy works on a copy: the runner's own checkout is never handed
+          # to it, so nothing it plants there (hooks, git config) can run
+          # when the runner touches the checkout again.
+          work="$RUNNER_TEMP/agy-work"
+          mkdir -p "$work" "$MERGEPROOF_HANDOFF"
+          cp -a "$GITHUB_WORKSPACE"/. "$work"/
           # Commits are authored by the bot account the PR comes from.
-          git config user.name "$BOT_LOGIN"
-          git config user.email "$BOT_LOGIN@users.noreply.github.com"
-          mkdir -p "$MERGEPROOF_HANDOFF"
+          git -C "$work" config user.name "$BOT_LOGIN"
+          git -C "$work" config user.email "$BOT_LOGIN@users.noreply.github.com"
           log="$RUNNER_TEMP/agy.log"
           set +e
-          agy -p "$AGENT_PROMPT" --model "$MODEL" --dangerously-skip-permissions --output-format text 2>&1 | tee "$log"
+          # -e NAME (no value) passes the variable from this step's env, so
+          # the key never appears in an argument list.
+          docker run --rm --init \
+            --user "$(id -u):$(id -g)" --cap-drop ALL --security-opt no-new-privileges \
+            -e GEMINI_API_KEY -e AGY_CLI_DISABLE_AUTO_UPDATE -e MERGEPROOF_HANDOFF -e HOME=/tmp/agy-home \
+            -v "$work:/work" -w /work \
+            -v "$MERGEPROOF_ISSUE_FILE:$MERGEPROOF_ISSUE_FILE:ro" \
+            -v "$MERGEPROOF_HANDOFF:$MERGEPROOF_HANDOFF" \
+            -v "$RUNNER_TEMP/agy/agy:/usr/local/bin/agy:ro" \
+            "$AGY_IMAGE" \
+            agy -p "$AGENT_PROMPT" --model "$MODEL" --dangerously-skip-permissions --output-format text 2>&1 | tee "$log"
           code="${PIPESTATUS[0]}"
           set -e
           # agy exits 3 and prints an AGY_ERROR line when the model call
@@ -544,25 +600,39 @@ jobs:
             exit 1
           fi
 
-      # Still untrusted territory: agy just ran. Nothing here talks to
-      # GitHub; the artifact is all the publish job gets, and it never
-      # trusts a byte of it.
+      # Still untrusted territory: agy just ran. The bundle is made in the
+      # same container image (agy's copy may carry hooks or git config, so
+      # the runner never runs git on it), and the runner only copies plain
+      # files with known names out: a symlink agy left could otherwise make
+      # the upload read a runner file. Nothing here talks to GitHub; the
+      # artifact is all the publish job gets, and it never trusts a byte of it.
       - name: Bundle the agent branch and handoff files
         env:
+          AGY_IMAGE: ${{ steps.image.outputs.image }}
           MERGEPROOF_HANDOFF: ${{ runner.temp }}/mergeproof-handoff
         run: |
           set -euo pipefail
+          work="$RUNNER_TEMP/agy-work"
+          made="$RUNNER_TEMP/agy-made"
           out="$RUNNER_TEMP/agy-out"
-          mkdir -p "$out"
+          mkdir -p "$made" "$out"
           # Only agent/* branches (the playbook's namespace) belong in the
           # bundle; git refuses an empty bundle, so it is created only when
           # the agent left one.
-          if [ -n "$(git for-each-ref --format='%(refname)' 'refs/heads/agent/*')" ]; then
-            git bundle create "$out/agent.bundle" --branches='agent/*'
-          fi
-          if [ -d "$MERGEPROOF_HANDOFF" ]; then
-            cp -R "$MERGEPROOF_HANDOFF"/. "$out"/
-          fi
+          docker run --rm --user "$(id -u):$(id -g)" --cap-drop ALL --security-opt no-new-privileges \
+            -e HOME=/tmp/agy-home -v "$work:/work" -w /work -v "$made:/made" "$AGY_IMAGE" \
+            sh -c 'if [ -n "$(git for-each-ref --format="%(refname)" "refs/heads/agent/*")" ]; then git bundle create /made/agent.bundle --branches="agent/*"; fi'
+          take() {
+            if [ -L "$1" ] || { [ -e "$1" ] && [ ! -f "$1" ]; }; then
+              echo "::error::$1 is not a plain file; not uploading it"
+              exit 1
+            fi
+            if [ -f "$1" ]; then cp "$1" "$out/$2"; fi
+          }
+          take "$made/agent.bundle" agent.bundle
+          for f in pr-title.txt pr-body.md stop-comment.md; do
+            take "$MERGEPROOF_HANDOFF/$f" "$f"
+          done
           # An empty handoff still uploads: the publish job turns "no
           # branch, no stop comment" into the same no-pull-request comment
           # the claude path posts.
@@ -587,9 +657,6 @@ jobs:
   agy-publish:
     if: vars.MERGEPROOF_MODE != 'off' && needs.agent.outputs.harness == 'agy' && needs.agent.outputs.stopped != 'true'
     needs: [agent, agy-run]
-    concurrency:
-      group: mergeproof-issue-${{ github.event.issue.number || github.event.inputs.issue }}
-      cancel-in-progress: false
     permissions:
       contents: read
       issues: write
@@ -653,6 +720,9 @@ jobs:
             case "$pr_title" in
               *$'\n'*) fail "pr-title.txt must be a single line" ;;
             esac
+            if [ -z "${pr_title//[[:space:]]/}" ]; then
+              fail "pr-title.txt must not be empty"
+            fi
             if [ "${#pr_title}" -gt 200 ]; then
               fail "pr-title.txt is longer than 200 characters"
             fi
@@ -684,16 +754,15 @@ jobs:
             *) fail "the agent bundle holds $ref, not a branch" ;;
           esac
 
-          # The branch name: on a retry exactly the pull request's existing
-          # head branch (as the agent job resolved it); on a new run the
-          # playbook's agent/<kind>-<issue>-<slug> shape, with this run's
-          # kind and issue number.
+          # The branch name: the playbook's agent/<kind>-<issue>-<slug>
+          # shape, with this run's kind and issue number; on a retry also
+          # exactly the pull request's existing head branch (as the agent
+          # job resolved it), so a retry never pushes to any other branch.
+          if ! printf '%s' "$branch" | grep -Eq "^agent/$KIND-$ISSUE_NUMBER-[a-z0-9][a-z0-9-]{0,60}$"; then
+            fail "the branch name $branch does not match agent/$KIND-$ISSUE_NUMBER-<slug>"
+          fi
           if [ -n "$PR_NUMBER" ]; then
             [ "$branch" = "$PR_HEAD_REF" ] || fail "the retry must stay on $PR_HEAD_REF, not $branch"
-          else
-            if ! printf '%s' "$branch" | grep -Eq "^agent/$KIND-$ISSUE_NUMBER-[a-z0-9][a-z0-9-]{0,60}$"; then
-              fail "the branch name $branch does not match agent/$KIND-$ISSUE_NUMBER-<slug>"
-            fi
           fi
 
           git fetch -q "$bundle" "+refs/heads/$branch:refs/heads/$branch" || fail "the agent branch could not be fetched from the bundle"
@@ -712,16 +781,21 @@ jobs:
           # The changes the branch introduces must stay off the gate's own
           # ground: the bot token must never push workflow or gate files
           # (the gate's tamper rules would catch it later, but the push
-          # itself must not happen).
-          changed="$(git diff --name-only "origin/$DEFAULT_BRANCH...refs/heads/$branch")"
-          while IFS= read -r path; do
+          # itself must not happen). Raw NUL-separated paths with renames
+          # split into delete + add, so neither quoting of unusual names nor
+          # a rename out of .github can hide a path from the check.
+          changed="$(mktemp)"
+          git -c core.quotePath=false diff --no-renames --name-only -z \
+            "origin/$DEFAULT_BRANCH...refs/heads/$branch" > "$changed" \
+            || fail "the agent branch's changes could not be listed"
+          while IFS= read -r -d '' path; do
             [ -n "$path" ] || continue
             case "$path" in
               .github | .github/* | .mergeproof.json | .mergeproof | .mergeproof/*)
                 fail "the agent branch touches $path, which the bot token must never push"
                 ;;
             esac
-          done <<< "$changed"
+          done < "$changed"
 
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
           echo "ok=true" >> "$GITHUB_OUTPUT"
@@ -732,6 +806,7 @@ jobs:
       # gh from a file-read variable and a --body-file, never a script or
       # ${{ }} interpolation.
       - name: Push the branch and open the pull request
+        id: push
         if: success() && steps.validate.outputs.ok == 'true' && steps.validate.outputs.branch != ''
         env:
           GH_TOKEN: ${{ secrets.MERGEPROOF_BOT_TOKEN }}
@@ -803,19 +878,29 @@ jobs:
           gh pr comment "$pr" --repo "$REPO" --body "<!-- mergeproof-dispatch issue=$ISSUE_NUMBER skill=$SKILL -->
           Mergeproof dispatched the agent for issue #$ISSUE_NUMBER using $SKILL."
 
-      # Validation refused the output: tell the issue, hand it to a human,
-      # fail the run. Nothing was pushed — every publishing step is gated
-      # on ok != false.
+      # Validation refused the output, validation itself broke, or the
+      # publish failed: tell the issue, hand it to a human, fail the run.
+      # A refused or unvalidated output was never pushed: every publishing
+      # step is gated on ok == 'true'.
       - name: Refuse an agy output that failed validation
-        if: success() && steps.validate.outputs.ok == 'false'
+        if: >-
+          !cancelled() && (steps.validate.outcome == 'failure'
+          || steps.validate.outputs.ok == 'false'
+          || steps.push.outcome == 'failure')
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ needs.agent.outputs.issue-number }}
+          PUSH_OUTCOME: ${{ steps.push.outcome }}
         run: |
           set -euo pipefail
+          if [ "$PUSH_OUTCOME" = 'failure' ]; then
+            what="mergeproof could not finish publishing the agy run's output"
+          else
+            what="the agy run produced an output mergeproof refused to publish; nothing was pushed"
+          fi
           gh issue comment "$ISSUE_NUMBER" --repo "$REPO" \
-            --body "Mergeproof: the agy run produced an output mergeproof refused to publish (check this run's logs). A human should take this issue over."
+            --body "Mergeproof: $what (check this run's logs). A human should take this issue over."
           gh issue edit "$ISSUE_NUMBER" --repo "$REPO" --add-label needs-human
-          echo "::error::the agy output failed validation; nothing was pushed"
+          echo "::error::$what"
           exit 1

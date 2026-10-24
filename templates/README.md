@@ -49,6 +49,7 @@ enforce lives in `.mergeproof.json`, not in this variable.
 | `MERGEPROOF_HARNESS` | `claude` | Maintainer | Which coding agent the issue workflow runs: `claude` (`anthropics/claude-code-action`) or `agy` (the Antigravity CLI, headless). `agy` also needs `MERGEPROOF_AGENT=agy`, so its PRs land in their own trust bucket; any other value stops the run. Read the agy notes below before switching. |
 | `MERGEPROOF_AGY_URL` | the pinned 1.4.6 tarball | Maintainer | Release tarball the agy harness downloads. Change it only together with `MERGEPROOF_AGY_SHA512`. |
 | `MERGEPROOF_AGY_SHA512` | the pinned 1.4.6 hash | Maintainer | SHA-512 the download must match, or the step fails before anything runs. |
+| `MERGEPROOF_AGY_IMAGE` | `node:22-trixie@sha256:…` (pinned) | Maintainer | Container image agy runs in. It needs node and git (the playbook runs the repo's tests and `mergeproof check --local`); set another image when your tests need more. Must be pinned by digest (`<image>@sha256:<64 hex>`) or the run stops. |
 
 ## Secrets (Settings → Secrets and variables → Actions → Secrets)
 
@@ -72,16 +73,21 @@ runner (or an environment) with a GitHub credential:
   as a one-day artifact for the other jobs. It never runs agy. On a retry
   its context step also resolves the pull request's head branch name (with
   the job's own default token) so the agy job can start from it.
-- **`agy-run`** installs the pinned binary and runs `agy -p`. Its only
-  secret is `MERGEPROOF_MODEL_KEY` (as `GEMINI_API_KEY`): no `GH_TOKEN`, no
-  `MERGEPROOF_BOT_TOKEN`, no credential helper, `contents: read` and no `gh`
-  call anywhere. A prompt-injected agy can leak the Gemini key and reach
-  what any code on a runner can (such as the Actions cache for the default
-  branch), but no GitHub write credential, and it
-  cannot plant a fake `gh`/`git` or a `GIT_*`/`LD_PRELOAD` environment for a
-  credentialed step to inherit, because the credentialed work runs in a
-  different job on a fresh runner (a later step in the same job would
-  inherit all of that). The prompt is the claude prompt with exactly two
+- **`agy-run`** installs the pinned binary and runs `agy -p` inside a
+  container (`MERGEPROOF_AGY_IMAGE`, pinned by digest) that sees a copy of
+  the checkout, the trusted issue file and the binary (both read-only) and
+  the handoff directory: no runner directory, no Docker socket, no Linux
+  capabilities. Its only secret is `MERGEPROOF_MODEL_KEY` (as
+  `GEMINI_API_KEY`, passed by name so it never sits in an argument list):
+  no `GH_TOKEN`, no `MERGEPROOF_BOT_TOKEN`, no credential helper,
+  `contents: read` and no `gh` call anywhere. A prompt-injected agy can leak
+  the Gemini key (the container has network for the model API and npm), but
+  it holds no GitHub credential, cannot reach the runner's Actions runtime
+  token or the Actions cache behind it, and cannot plant a fake `gh`/`git`
+  or a `GIT_*`/`LD_PRELOAD` environment for a credentialed step to inherit:
+  the credentialed work runs in a different job on a fresh runner. The
+  bundle is made in the same image, and only plain files with the four
+  known names leave the container's output. The prompt is the claude prompt with exactly two
   substitutions: agy has no GitHub access and must not push, it commits on
   the branch the playbook names and writes the pull request title to
   `$MERGEPROOF_HANDOFF/pr-title.txt`, the body (the playbook's report) to
@@ -92,12 +98,15 @@ runner (or an environment) with a GitHub credential:
 - **`agy-publish`** runs on a fresh runner that never runs agy, npm or any
   code from the repo or the bundle. It downloads that artifact and treats
   every file in it as untrusted data: the bundle must verify and hold
-  exactly one branch named `agent/<kind>-<issue>-<slug>` (on a retry,
-  exactly the pull request's head branch), its tip must descend from the
-  default-branch tip (a retry must fast-forward the pull request's current
-  head, never force it), and the changes it introduces must not touch
-  `.github/`, `.mergeproof.json` or `.mergeproof/`: the bot PAT must never
-  push workflow or gate files. The title must be one line of at most 200
+  exactly one branch named `agent/<kind>-<issue>-<slug>` (on a retry, also
+  exactly the pull request's head branch; a fork pull request is never
+  retried), its tip must descend from the default-branch tip (a retry must
+  fast-forward the pull request's current head, never force it), and the
+  changes it introduces must not touch `.github/`, `.mergeproof.json` or
+  `.mergeproof/`, checked on raw paths with renames split, so neither an
+  unusual file name nor a rename out of `.github/` slips past: the bot PAT
+  must never push workflow or gate files. The title must be one non-empty
+  line of at most 200
   characters without control characters, the body and the stop comment at
   most 60000 bytes, and gh receives them only through `--title` from a
   file-read variable and `--body-file`. Only then does the job push with
@@ -105,7 +114,10 @@ runner (or an environment) with a GitHub credential:
   the stop comment as the bot and post the dispatch marker with
   `github.token` (new runs only). An output that fails validation is
   refused: a comment on the issue, the `needs-human` label and a red run;
-  nothing was pushed. No branch and no stop comment behaves like the
+  nothing was pushed. A validation step that breaks or a push that fails
+  gets the same comment, label and red run. The bot's own comments (an agy
+  stop comment) never come back into a later run's issue file as trusted
+  text. No branch and no stop comment behaves like the
   claude path's "agent finished without opening a pull request".
 
 Two things are weaker than on the claude path, and the template says so
@@ -124,7 +136,9 @@ next to the steps:
   is not backed by anything. The trusted issue file is the only
   prompt-injection control on this path; the job split is what bounds the
   blast radius, since an injected agent can reach GitHub only through work
-  that `agy-publish` validates before anything is pushed.
+  that `agy-publish` validates before anything is pushed. The container
+  keeps it off the runner's Actions runtime token, so it cannot poison the
+  Actions cache either.
 
 `AGY_CLI_DISABLE_AUTO_UPDATE=1` is set so the pinned binary does not replace
 itself mid-run (taken from the binary's strings; agy does not document it).
