@@ -96,6 +96,8 @@ The worktree keeps agy out of your checkout, but it is not a sandbox: agy runs a
 
 Limits: a dispatched PR has no dispatch marker, so the gate gets no `--issue` (every agy PR is in the feature bucket, with no bugfix split) and a `RETRY` does not start agy again: run `dispatch` again or fix the PR by hand.
 
+The issue workflow can run agy instead of Claude Code: set the `MERGEPROOF_HARNESS` repo variable to `agy` (with `MERGEPROOF_AGENT=agy` and a Gemini key in `MERGEPROOF_MODEL_KEY`). It installs a pinned agy release checked by SHA-512 rather than Google's unpinned installer, and it has no tool deny-list; [`templates/README.md`](templates/README.md#the-agy-harness-mergeproof_harnessagy) covers both.
+
 ## GitHub Actions
 
 This repo's [`action.yml`](action.yml) is the reusable `ahmed-3m/mergeproof@v1` composite action (`check` | `apply` | `sync`), and [`templates/workflows/`](templates/README.md) ships the three workflow templates — issue to agent PR, PR to gate + apply, nightly ledger sync. `mergeproof init` copies them into your repo and fills in `{{CI_WORKFLOW}}` and `{{INSTALL_COMMAND}}` — the placeholders, repo variables and secrets are documented in [`templates/README.md`](templates/README.md), and every job's permissions in [SECURITY.md](SECURITY.md#workflow-permissions).
