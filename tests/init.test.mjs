@@ -355,7 +355,7 @@ test('remote setup sets labels, variables and secrets, and only those', async ()
     const gh = fakeGh();
     const out = [];
     assert.equal(await runInit(['--yes', '--model', 'glm-4.7', '--bot-login', 'some-bot'], depsFor(repo, gh, out, { env: { MERGEPROOF_MODEL_KEY: MODEL_KEY, MERGEPROOF_BOT_TOKEN: BOT_TOKEN } })), 0, out.join('\n'));
-    assert.deepEqual(gh.calls.label.map((l) => l.name), ['agent', 'needs-human']);
+    assert.deepEqual(gh.calls.label.map((l) => l.name), ['agent', 'urgent', 'needs-human']);
     for (const call of gh.calls.label) {
       assert.equal(call.repo, 'acme/app');
       assert.match(call.color, /^[0-9A-F]{6}$/i);
@@ -465,8 +465,8 @@ test('a TTY asks for confirmation with the count and the repo; yes applies, no s
     const gh = fakeGh();
     const out = [];
     assert.equal(await runInit(['--model', 'kimi-k2', '--bot-login', 'some-bot'], depsFor(repo, gh, out, { isTTY: true, confirm })), 0, out.join('\n'));
-    assert.deepEqual(questions, ['Apply 5 remote changes to acme/app? [y/N] ']); // 2 labels + 3 variables; the two unset secrets are manual steps, not counted
-    assert.deepEqual(gh.calls.label.length, 2, 'confirmed: writes applied');
+    assert.deepEqual(questions, ['Apply 6 remote changes to acme/app? [y/N] ']); // 3 labels + 3 variables; the two unset secrets are manual steps, not counted
+    assert.deepEqual(gh.calls.label.length, 3, 'confirmed: writes applied');
 
     const gh2 = fakeGh();
     const out2 = [];
