@@ -67,6 +67,14 @@ export const TAMPER_RULES = [
     const hit = ctx.files.filter((f) => matchesAny(f.path, GATE_FILES) || (f.oldPath && matchesAny(f.oldPath, GATE_FILES)));
     return first(hit, (f) => `edits gate file ${f.path}`);
   },
+  function agentInstructionsEdited(ctx) {
+    // AGENTS.md, CLAUDE.md, .cursor/rules and friends are prompts for every
+    // later agent run, so an agent PR may not rewrite them (they would
+    // otherwise classify as docs and could auto-merge).
+    const globs = ctx.config.paths.agentInstructions;
+    const hit = ctx.files.filter((f) => matchesAny(f.path, globs) || (f.oldPath && matchesAny(f.oldPath, globs)));
+    return first(hit, (f) => `edits agent instructions ${f.path}`);
+  },
   function existingTestEdited(ctx) {
     const hit = ctx.files.filter((f) => (f.status === 'M' || f.status === 'R') && (isTest(ctx, f.path) || isTest(ctx, f.oldPath)));
     return first(hit, (f) => `edits existing test ${f.oldPath ?? f.path}`);
