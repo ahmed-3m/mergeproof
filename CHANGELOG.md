@@ -5,7 +5,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ## [Unreleased]
 
 ### Security
-- Agent-instruction files no longer count as docs. An agent PR that adds, edits, renames or deletes `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.cursorrules`, `.cursor/**`, `.claude/**`, `.github/copilot-instructions.md` or another file in the new `paths.agentInstructions` list is the `agentInstructionsEdited` tamper rule (`HUMAN`, no retry); before, a `*.md` instruction file matched `paths.docs`, so a docs-only PR rewriting the instructions every later agent run follows could auto-merge once docs was trusted.
+- Agent-instruction files no longer count as docs. An agent PR that adds, edits, renames or deletes `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.cursorrules`, `.cursor/**`, `.claude/**`, `.github/copilot-instructions.md` or another file in the new `paths.agentInstructions` list (matched ignoring case) is the `agentInstructionsEdited` tamper rule (`HUMAN`, no retry); before, a `*.md` instruction file matched `paths.docs`, so a docs-only PR rewriting the instructions every later agent run follows could auto-merge once docs was trusted.
 
 ### Added
 - `agents.identities` in `.mergeproof.json` maps an agent login to its own trust bucket, e.g. `"agy-bot": { "agent": "agy", "model": "gemini-4-argon-high" }`. `check` and `apply` use it for PRs by that login instead of the `--agent`/`--model` flags (the flags stay the fallback), so one workflow can gate several agents in separate buckets. Like the rest of the config it is read from the base branch tip; each login must also be in `agents.logins`.

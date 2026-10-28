@@ -104,7 +104,7 @@ v1 reads plain JSON, so the gate needs no parser of its own. YAML may come later
     "testSupport": ["**/fixtures/**", "**/__fixtures__/**", "**/__snapshots__/**", "**/__mocks__/**", "**/helpers/**", "**/*.snap", "**/*.json"],
     "docs": ["docs/**", "**/*.md"],
     "manifests": ["package.json", "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml"],
-    "agentInstructions": ["AGENTS.md", "CLAUDE.md", "CLAUDE.local.md", "GEMINI.md", "CONVENTIONS.md", ".cursorrules", ".windsurfrules", ".clinerules", "**/.clinerules/**", "**/.cursor/**", "**/.windsurf/**", "**/.claude/**", "**/.gemini/**", "**/.codex/**", "**/.agents/**", ".aider*", ".github/copilot-instructions.md"]
+    "agentInstructions": ["AGENTS.md", "AGENT.md", "CLAUDE.md", "CLAUDE.local.md", "GEMINI.md", "CONVENTIONS.md", ".cursorrules", ".windsurfrules", ".clinerules", ".roorules", "**/.clinerules/**", "**/.cursor/**", "**/.windsurf/**", "**/.claude/**", "**/.gemini/**", "**/.codex/**", "**/.agents/**", "**/.roo/**", "**/.junie/**", "**/.kiro/**", ".aider*", ".github/copilot-instructions.md"]
   },
   "issueLabels": { "bugfix": ["bug"] },
   "limits": { "maxDiffLines": 300, "testTimeoutSec": 600, "ciWaitSec": 600 },
@@ -119,7 +119,7 @@ v1 reads plain JSON, so the gate needs no parser of its own. YAML may come later
 - Globs: `**` spans directories, `*` and `?` stay inside one segment, and a pattern with no `/` matches the file name at any depth.
 - `quarantine`: test files left out of per-file proof runs because they are known to be flaky.
 - `paths.testSupport`: files under a `paths.tests` glob that are not tests themselves (helpers, fixtures, snapshots). They still make a change a feature or bugfix, but are never run as a new test that must fail on base. A file named like a test (`*.test.*`, `*.spec.*`) is always a test, even in such a directory.
-- `paths.agentInstructions`: files coding agents read as instructions on every run (`AGENTS.md`, `CLAUDE.md`, `.cursor/**`, ...). An agent PR that adds, edits, renames or deletes one is the `agentInstructionsEdited` tamper rule: `HUMAN`, no retry. They would otherwise match `paths.docs` and could auto-merge as docs, steering every later agent run. Extend the list in the base branch's config for other agents.
+- `paths.agentInstructions`: files coding agents read as instructions on every run (`AGENTS.md`, `CLAUDE.md`, `.cursor/**`, ...). An agent PR that adds, edits, renames or deletes one is the `agentInstructionsEdited` tamper rule: `HUMAN`, no retry. They would otherwise match `paths.docs` and could auto-merge as docs, steering every later agent run. Matching ignores case, because macOS and Windows load `claude.md` as `CLAUDE.md`. Extend the list in the base branch's config for other agents, and for files an instruction file pulls in (`@docs/style.md`): those still count as docs.
 - `limits.ciWaitSec`: how long `check` and `apply` wait for CI that is still pending (other workflows), re-reading it every 30 seconds; `0` turns the wait off. CI still pending after the wait is HUMAN, never RETRY.
 
 ## Ledger (`mergeproof-ledger@1`, default `.mergeproof/ledger.json`)

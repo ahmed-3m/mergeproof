@@ -70,9 +70,10 @@ export const TAMPER_RULES = [
   function agentInstructionsEdited(ctx) {
     // AGENTS.md, CLAUDE.md, .cursor/rules and friends are prompts for every
     // later agent run, so an agent PR may not rewrite them (they would
-    // otherwise classify as docs and could auto-merge).
-    const globs = ctx.config.paths.agentInstructions;
-    const hit = ctx.files.filter((f) => matchesAny(f.path, globs) || (f.oldPath && matchesAny(f.oldPath, globs)));
+    // otherwise classify as docs and could auto-merge). Case is ignored:
+    // macOS and Windows load claude.md as CLAUDE.md.
+    const globs = ctx.config.paths.agentInstructions.map((g) => g.toLowerCase());
+    const hit = ctx.files.filter((f) => [f.path, f.oldPath].some((p) => p && matchesAny(p.toLowerCase(), globs)));
     return first(hit, (f) => `edits agent instructions ${f.path}`);
   },
   function existingTestEdited(ctx) {

@@ -66,6 +66,9 @@ test('each tamper rule fires on its own violation', () => {
     [{ files: [...base, { path: '.cursor/rules/style.mdc', status: 'A', added: 3, deleted: 0 }] }, 'agentInstructionsEdited'],
     [{ files: [...base, { path: 'docs/agents.md', oldPath: 'AGENTS.md', status: 'R', added: 0, deleted: 0 }] }, 'agentInstructionsEdited'],
     [{ files: [...base, { path: 'CLAUDE.md', status: 'D', added: 0, deleted: 9 }] }, 'agentInstructionsEdited'],
+    [{ files: [...base, { path: 'pkg/Claude.md', status: 'A', added: 1, deleted: 0 }] }, 'agentInstructionsEdited'],
+    [{ files: [...base, { path: '.Cursor/rules/a.mdc', status: 'A', added: 1, deleted: 0 }] }, 'agentInstructionsEdited'],
+    [{ files: [...base, { path: '.kiro/steering/product.md', status: 'A', added: 1, deleted: 0 }] }, 'agentInstructionsEdited'],
     [{ files: [...base, { path: 'src/$(rm -rf).js', status: 'A', added: 1, deleted: 0 }] }, 'unsafePath'],
     [{ files: [...base, { path: '--exec=x.js', status: 'A', added: 1, deleted: 0 }] }, 'unsafePath'],
   ];
