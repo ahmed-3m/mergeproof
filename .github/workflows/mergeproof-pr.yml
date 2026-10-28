@@ -80,9 +80,12 @@ jobs:
           # dispatch marker or attempt count, and comments from every other
           # author is ignored. Each body is emitted as one JSON string
           # (@json escapes newlines and carriage returns), so a marker must
-          # match the strict pattern anywhere in a single comment — echoed
-          # text that merely starts a line with the marker prefix does not
-          # count — and a RETRY counts once per comment, never per line.
+          # match the strict pattern at the very start of a comment — the
+          # issue workflow posts it first; a bot comment that echoes
+          # agent-written text (a commit subject in a tamper note) carries
+          # it later in the body, or after a line break, and does not count
+          # — and a RETRY counts once per comment, never per line. The RETRY
+          # count stays unanchored: counting too many only costs attempts.
           # No `|| true` here: an empty result is already a valid empty
           # answer, so a failed fetch must fail the step — swallowing it
           # would reset the attempt count to 1 and drop the dispatch marker,
@@ -92,7 +95,7 @@ jobs:
 
           # The dispatch marker the issue workflow posted:
           #   <!-- mergeproof-dispatch issue=<n> skill=<name@version> -->
-          marker="$(grep -oE '<!-- mergeproof-dispatch issue=[0-9]+ skill=[A-Za-z0-9_@+./-]+ -->' <<< "$bodies" | tail -n 1 || true)"
+          marker="$(grep -oE '^"<!-- mergeproof-dispatch issue=[0-9]+ skill=[A-Za-z0-9_@+./-]+ -->' <<< "$bodies" | tail -n 1 || true)"
           issue=""
           skill=""
           if [ -n "$marker" ]; then
@@ -181,7 +184,7 @@ jobs:
         # HUMAN. 3 and 4 are verdicts, not failures; the step below fails the
         # job only on 1/2 (error / usage).
         continue-on-error: true
-        uses: ahmed-3m/mergeproof@v1
+        uses: ahmed-3m/mergeproof@7a74b37044ea23523c86b5ba2d5fdb23b7bfc3ac # main
         env:
           GH_TOKEN: ${{ github.token }}
         with:
@@ -262,7 +265,7 @@ jobs:
       - name: Land the verdict — mergeproof apply
         id: apply
         continue-on-error: true
-        uses: ahmed-3m/mergeproof@v1
+        uses: ahmed-3m/mergeproof@7a74b37044ea23523c86b5ba2d5fdb23b7bfc3ac # main
         env:
           # github.token, never the agent's bot token: verdict comments must be
           # authored by github-actions[bot] (the attempt count and the agent's
