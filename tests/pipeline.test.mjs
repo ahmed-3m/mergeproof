@@ -156,7 +156,7 @@ test('support files under a test glob are never proven as new tests', () => {
   ];
   const base = runner({ 'tests/a.test.js': ['fail'] }); // a helper run alone "passes" on base
   const ran = new Set();
-  const p = proveChange('feature', { ...proveCtx({ files }), runBase: (only) => (only.forEach((f) => ran.add(f)), base(only)) });
+  const p = proveChange('feature', { ...proveCtx({ files }), runBase: (only) => (only?.forEach((f) => ran.add(f)), base(only)) });
   assert.equal(p.ok, true, p.notes.map((n) => n.text).join('; '));
   assert.deepEqual([...ran], ['tests/a.test.js']);
   const helperOnly = proveChange('feature', proveCtx({ files: [files[0], files[2]] }));
@@ -208,6 +208,21 @@ test('refactor compares test-case counts between base and head', () => {
   assert.deepEqual(dropped.tamperNotes, [{ ok: false, rule: 'testCountDropped', text: 'test count dropped from 2 on base to 1 on head' }]);
   const unknown = proveChange('refactor', ctx({ '(suite)': ['pass'] }, { '(suite)': [{ pass: true, count: null }] }));
   assert.deepEqual([unknown.ok, unknown.tamperNotes], [true, []], 'unknown counts keep unknown runners working');
+});
+
+test('feature and bugfix compare test-case counts too, with the new tests on base', () => {
+  const ctx = (kind, base, head) => proveChange(kind, proveCtx({ base: { 'tests/a.test.js': ['fail'], ...base }, head }));
+  for (const kind of ['feature', 'bugfix']) {
+    const same = ctx(kind, { '(suite)': [{ pass: false, count: 5 }] }, { '(suite)': [{ pass: true, count: 5 }] });
+    assert.deepEqual([same.ok, same.tamperNotes], [true, []], 'a red base suite still counts its cases');
+    const dropped = ctx(kind, { '(suite)': [{ pass: false, count: 5 }] }, { '(suite)': [{ pass: true, count: 4 }] });
+    assert.deepEqual([dropped.ok, dropped.weak], [false, false], 'tampering is not weak, so there is no retry');
+    assert.deepEqual(dropped.tamperNotes, [{ ok: false, rule: 'testCountDropped', text: 'test count dropped from 5 on base to 4 on head' }]);
+    const unknown = ctx(kind, { '(suite)': [{ pass: false, count: null }] }, { '(suite)': [{ pass: true, count: 4 }] });
+    assert.deepEqual([unknown.ok, unknown.tamperNotes], [true, []], 'unknown counts keep unknown runners working');
+  }
+  const weak = proveChange('feature', proveCtx({ base: { 'tests/a.test.js': ['pass'] } }));
+  assert.equal(weak.weak, true, 'a failed new-test proof stops before the suites run');
 });
 
 test('refactor runs the head suite even when CI is green; red head stays weak', () => {

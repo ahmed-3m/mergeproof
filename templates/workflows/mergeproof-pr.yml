@@ -168,6 +168,13 @@ jobs:
           fi
       - name: Install dependencies
         run: "{{INSTALL_COMMAND}}"
+      - name: Create the unprivileged user the PR's tests run as
+        # check --test-user runs every proof test as this user (sudo), so PR
+        # code cannot write the verdict file, the checkout's .git, the ledger
+        # or the runner's action files, and every process it leaves running
+        # is killed before the gate writes its verdict. Without it a test can
+        # fork a background process that forges the verdict file after the gate.
+        run: sudo useradd --system --no-create-home --shell /usr/sbin/nologin mergeproof-tests
       - name: Gate — mergeproof check
         id: gate
         # Exit codes are the frozen verdict contract: 0 MERGE, 3 RETRY, 4
@@ -183,6 +190,7 @@ jobs:
             ${{ needs.context.outputs.pr-url }}
             --head ${{ needs.context.outputs.head-sha }}
             --verdict-out ${{ runner.temp }}/verdict.json
+            --test-user mergeproof-tests
             --agent ${{ needs.context.outputs.agent }}
             --model ${{ needs.context.outputs.model }}
             ${{ needs.context.outputs.skill-args }}
@@ -284,6 +292,9 @@ jobs:
           echo "::error::mergeproof apply failed (exit $CODE)"
           exit 1
       - name: Commit and push the ledger
+        # Also after apply failed: apply records the outcome before it merges,
+        # so a crash after the merge still leaves an open entry for sync.
+        if: ${{ !cancelled() && steps.apply.outcome != 'skipped' }}
         env:
           LEDGER_BRANCH: mergeproof-ledger
           LEDGER_DIR: .mergeproof-ledger

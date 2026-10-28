@@ -1,4 +1,5 @@
 import { runProcess } from './process.mjs';
+import { wrap } from './sandbox.mjs';
 import { SAFE_PATH } from '../tamper.mjs';
 
 // Test runner adapter. Results are per test file and come from exit codes, so
@@ -33,12 +34,16 @@ function cleanEnv() {
   return env;
 }
 
-function run(cwd, command, extra, timeoutSec) {
+// `testUser` ({ user, home }, from check --test-user) runs the command as that
+// unprivileged OS user through sudo; see sandbox.mjs.
+function run(cwd, command, extra, timeoutSec, testUser) {
   const [bin, ...args] = command.trim().split(/\s+/);
-  const res = runProcess(bin, [...args, ...extra], {
+  const env = cleanEnv();
+  const argv = testUser ? wrap(testUser.user, testUser.home, bin, [...args, ...extra], env) : { bin, args: [...args, ...extra] };
+  const res = runProcess(argv.bin, argv.args, {
     cwd,
     shell: process.platform === 'win32',
-    env: cleanEnv(),
+    env,
     timeoutMs: timeoutSec * 1000,
   });
   return { ok: res.code === 0 && !res.timedOut, output: `${res.stdout}\n${res.stderr}` };
@@ -89,17 +94,17 @@ export function parseTestCount(output) {
 }
 
 /** @returns {{ passed: string[], failed: string[], count?: number|null }} */
-export function runTests(repoRoot, { testCommand, testFileCommand, only = null, timeoutSec = 600 }) {
+export function runTests(repoRoot, { testCommand, testFileCommand, only = null, timeoutSec = 600, testUser = null }) {
   const passed = [];
   const failed = [];
   if (only === null) {
-    const { ok, output } = run(repoRoot, testCommand, [], timeoutSec);
+    const { ok, output } = run(repoRoot, testCommand, [], timeoutSec, testUser);
     (ok ? passed : failed).push(SUITE);
     return { passed, failed, count: parseTestCount(output) };
   }
   for (const file of only) {
     if (!SAFE_PATH.test(file)) throw new Error(`refusing to run unsafe test path ${JSON.stringify(file)}`);
-    (run(repoRoot, testFileCommand, [file], timeoutSec).ok ? passed : failed).push(file);
+    (run(repoRoot, testFileCommand, [file], timeoutSec, testUser).ok ? passed : failed).push(file);
   }
   return { passed, failed };
 }
