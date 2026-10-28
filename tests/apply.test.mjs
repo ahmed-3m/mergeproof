@@ -11,6 +11,8 @@ import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRepo, testFile, FIXED_MATH, BASE_FILES } from './fixtures/repo.mjs';
 import { runCheck, defaultDeps as checkDeps } from '../src/commands/check.mjs';
 import { runApply } from '../src/commands/apply.mjs';
+import { land } from '../src/land.mjs';
+import { settle } from '../src/commands/sync.mjs';
 import { checksState, parsePrUrl } from '../src/adapters/gh.mjs';
 import { emptyLedger, readLedger, writeLedger } from '../src/ledger.mjs';
 import { parseTrailer } from '../src/trailer.mjs';
@@ -166,6 +168,34 @@ test('apply lands a MERGE verdict in enforce mode: merge pinned to the gated hea
     assert.equal(gh.calls.comment.length, 1);
     assert.match(out[0], /MERGE \(kind: bugfix\)[\s\S]*enforce: merged/);
     assert.deepEqual(gh.calls.label, [], 'MERGE adds no label');
+  } finally {
+    repo.cleanup();
+  }
+});
+
+test('land records the outcome before merging, so a crash after the merge still leaves it for sync', () => {
+  const repo = createRepo(BASE_FILES);
+  const ledgerPath = join(repo.dir, '.mergeproof/ledger.json');
+  const url = URL;
+  let atMerge = null;
+  const gh = {
+    squashMerge: () => (atMerge = readLedger(ledgerPath).outcomes.map((o) => [o.pr, o.status])),
+    getPullRequest: () => { throw new Error('network down'); },
+    comment: () => assert.fail('no comment after a crash'),
+  };
+  const input = {
+    prUrl: url, pr: { number: 77, url }, ledger: emptyLedger(), ledgerPath, config: { mode: 'enforce' },
+    verdict: { verdict: 'MERGE', kind: 'bugfix', notes: [] }, kind: 'bugfix', proven: true,
+    agent: 'claude-code', model: 'glm-5.2', skill: null, attempts: 1, headSha: 'a'.repeat(40), mode: 'enforce',
+  };
+  try {
+    assert.throws(() => land(input, { gh, now: () => new Date('2026-10-01T00:00:00Z') }), /network down/);
+    assert.deepEqual(atMerge, [[77, 'open']], 'the open outcome is on disk when the merge happens');
+    const { ledger } = settle(readLedger(ledgerPath), {
+      commits: [], now: new Date('2026-10-02T00:00:00Z'), windowDays: 7,
+      prState: () => ({ state: 'MERGED', mergedAt: '2026-10-01T00:00:01Z', mergeCommit: 'f'.repeat(40) }),
+    });
+    assert.deepEqual(ledger.outcomes.map((o) => [o.pr, o.status, o.mergeCommit]), [[77, 'pending', 'f'.repeat(40)]], 'sync picks the merge up');
   } finally {
     repo.cleanup();
   }
