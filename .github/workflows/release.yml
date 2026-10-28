@@ -1,0 +1,80 @@
+# Release: publish to npm, move the v1 action tag, cut the GitHub Release.
+#
+# Triggered only by semver tags (v0.1.0, …). The moving `v1` tag does NOT
+# match the trigger glob, so force-moving it here can never start a second
+# publish. A re-run of the same tag is safe: an already-published version is
+# tolerated and the v1 move + release still complete.
+
+name: release
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+
+permissions:
+  contents: write # move the v1 tag and create the GitHub Release
+  id-token: write # npm provenance (optional; the plain publish is the fallback)
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - run: npm test
+      - name: Publish to npm (provenance optional, re-runs tolerated)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          # No NPM_TOKEN: the maintainer has not opted into publishing (the
+          # repo may still be private). The v1 tag and the Release still land;
+          # re-run this tag after adding the secret to publish.
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "::warning::NPM_TOKEN is not set; skipping npm publish for $version"
+            exit 0
+          fi
+          if npm publish --access public --provenance; then :;
+          else
+            echo "::warning::provenance publish failed; retrying without it"
+            npm publish --access public
+          fi || {
+            # Both attempts failed: acceptable only when this version is
+            # already on npm (a re-run of the same tag).
+            if npm view "@ahmed-3m/mergeproof@$version" version >/dev/null 2>&1; then
+              echo "::notice::$version is already published; continuing"
+            else
+              exit 1
+            fi
+          }
+      - name: Move the v1 tag (the action templates reference ahmed-3m/mergeproof@v1)
+        run: |
+          set -euo pipefail
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            tag -fa v1 -m "v1 tracks the latest release"
+          git push origin v1 --force
+      - name: Create the GitHub Release from the changelog section
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          notes="$(node -e '
+            const fs = require("fs");
+            const v = process.argv[1].replace(/^v/, "");
+            const s = fs.readFileSync("CHANGELOG.md", "utf8");
+            // Under "m", a bare $ is any line end and the lazy section match
+            // would stop at the first one; (?![\\s\\S]) is the end of the file.
+            const m = s.match(new RegExp("^## \\[" + v + "\\][^\\n]*\\n([\\s\\S]*?)(?=^## \\[|(?![\\s\\S]))", "m"));
+            process.stdout.write(m ? m[1].trim() : "");
+          ' "$TAG")"
+          # Create only when missing; a real create failure (auth, API) must
+          # fail the job — after this point the v1 tag has already moved, so
+          # a silent skip would hide a broken release.
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "$TAG" --notes "$notes"
+          fi

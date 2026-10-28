@@ -1,0 +1,109 @@
+# Main guard: flag every change to main that did not land through a reviewed,
+# CI-green pull request.
+#
+# A free private repo cannot have branch protection or rulesets, so nothing
+# stops a token with `repo` scope (a person, or any local agent using their gh
+# login) from pushing to main or merging a PR before its CI ran. This workflow
+# cannot prevent that; it makes it loud. A push fails this job and opens an
+# issue when:
+#   - it force-pushed main;
+#   - a pushed commit belongs to no merged PR (a direct push);
+#   - a merged PR's required CI jobs had not all succeeded on its head before
+#     the merge, or another Actions check run on that head failed.
+#
+# Limit: a push runs its own copy of this file, so a direct push can also
+# weaken or delete the guard. It catches careless writers (an agent pushing to
+# main), not a deliberate one; only branch protection (public repo or GitHub
+# Pro) closes that.
+
+name: main-guard
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+  checks: read
+  issues: write
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check how the push reached main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.after }}
+          FORCED: ${{ github.event.forced }}
+          PUSHER: ${{ github.event.pusher.name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          problems=()
+          sha_re='^[0-9a-f]{40}$'
+          [[ "$AFTER" =~ $sha_re ]] || { echo "::error::unexpected after SHA"; exit 1; }
+
+          if [ "$FORCED" = "true" ]; then
+            problems+=("main was force-pushed (before ${BEFORE:0:12})")
+          fi
+
+          if [[ "$BEFORE" =~ ^0+$ ]] || ! [[ "$BEFORE" =~ $sha_re ]]; then
+            shas="$AFTER"
+          else
+            # compare lists at most 250 commits; a bigger push is itself suspect.
+            shas="$(gh api "repos/$REPO/compare/$BEFORE...$AFTER" --jq '.commits[].sha')"
+            count="$(printf '%s\n' "$shas" | grep -c . || true)"
+            [ "$count" -lt 250 ] || problems+=("push of $count+ commits: too many to check")
+          fi
+
+          declare -A seen=()
+          for sha in $shas; do
+            [[ "$sha" =~ $sha_re ]] || continue
+            prs="$(gh api "repos/$REPO/commits/$sha/pulls" \
+              --jq '[.[] | select(.merged_at != null and .base.ref == "main") | .number] | unique | .[]')"
+            if [ -z "$prs" ]; then
+              problems+=("commit ${sha:0:12} is not part of any merged PR (direct push)")
+              continue
+            fi
+            for pr in $prs; do
+              [ -z "${seen[$pr]:-}" ] || continue
+              seen[$pr]=1
+              read -r head merged_at < <(gh api "repos/$REPO/pulls/$pr" --jq '[.head.sha, .merged_at] | @tsv')
+              [[ "$head" =~ $sha_re ]] || { problems+=("PR #$pr: unreadable head"); continue; }
+              # The required CI jobs (ci.yml: the 2-OS x 3-Node test matrix and
+              # package-smoke; update REQUIRED when that matrix changes) must
+              # each have succeeded on the PR head before the merge. skipped or
+              # neutral does not count; any other Actions run must not have failed.
+              verdict="$(gh api "repos/$REPO/commits/$head/check-runs?per_page=100" | jq -r --arg m "$merged_at" '
+                ["package-smoke",
+                 "test (ubuntu-latest, 18)", "test (ubuntu-latest, 22)", "test (ubuntu-latest, 24)",
+                 "test (windows-latest, 18)", "test (windows-latest, 22)", "test (windows-latest, 24)"] as $required
+                | [(.check_runs // error("check-runs API returned no data"))[] | select(.app.slug == "github-actions")] as $runs
+                | [$required[] as $n | select([$runs[] | select(.name == $n
+                      and .status == "completed" and .conclusion == "success"
+                      and .completed_at <= $m)] | length == 0) | $n] as $missing
+                | [$runs[] | select((.conclusion // "") | IN("failure", "cancelled", "timed_out", "action_required", "startup_failure"))] as $failed
+                | if ($missing | length) > 0 then "required CI not green before the merge: \($missing | join(", "))"
+                  elif ($failed | length) > 0 then "\($failed | length) failed CI check run(s)"
+                  else "ok" end')"
+              [ "$verdict" = "ok" ] || problems+=("PR #$pr merged with $verdict")
+            done
+          done
+
+          if [ "${#problems[@]}" -eq 0 ]; then
+            echo "main-guard: every commit landed through a CI-green PR"
+            exit 0
+          fi
+
+          body="$(printf 'A push to `main` by `%s` (`%s`) bypassed the PR + green-CI rule:\n\n' "$PUSHER" "${AFTER:0:12}")"
+          for p in "${problems[@]}"; do
+            echo "::error::$p"
+            body+="$(printf '\n- %s' "$p")"
+          done
+          body+="$(printf '\n\nRun: %s\n\nIf this was not you, revoke the token that pushed it (gh auth, PATs, connected apps) before trusting main.' "$RUN_URL")"
+          gh issue create --repo "$REPO" --title "main-guard: unreviewed change to main (${AFTER:0:12})" --body "$body"
+          exit 1

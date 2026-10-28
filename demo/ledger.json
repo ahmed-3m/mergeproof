@@ -1,0 +1,25 @@
+{
+  "schema": "mergeproof-ledger@1",
+  "outcomes": [
+    { "pr": 1, "kind": "bugfix", "agent": "claude-code", "model": "glm-5.2", "skill": "bugfix@1", "attempts": 1, "verdict": "MERGE", "mergedAt": "2026-09-01T10:00:00Z", "status": "clean" },
+    { "pr": 2, "kind": "bugfix", "agent": "claude-code", "model": "glm-5.2", "skill": "bugfix@1", "attempts": 1, "verdict": "MERGE", "mergedAt": "2026-09-02T10:00:00Z", "status": "clean" },
+    { "pr": 3, "kind": "bugfix", "agent": "claude-code", "model": "glm-5.2", "skill": "bugfix@1", "attempts": 2, "verdict": "MERGE", "mergedAt": "2026-09-03T10:00:00Z", "status": "clean" },
+    { "pr": 4, "kind": "bugfix", "agent": "claude-code", "model": "glm-5.2", "skill": "bugfix@1", "attempts": 1, "verdict": "MERGE", "mergedAt": "2026-09-04T10:00:00Z", "status": "clean" },
+    { "pr": 5, "kind": "bugfix", "agent": "claude-code", "model": "glm-5.2", "skill": "bugfix@1", "attempts": 1, "verdict": "MERGE", "mergedAt": "2026-09-05T10:00:00Z", "status": "clean" },
+    { "pr": 6, "kind": "bugfix", "agent": "claude-code", "model": "glm-5.2", "skill": "bugfix@1", "attempts": 1, "verdict": "MERGE", "mergedAt": "2026-09-06T10:00:00Z", "status": "clean" },
+    { "pr": 7, "kind": "bugfix", "agent": "claude-code", "model": "glm-5.2", "skill": "bugfix@1", "attempts": 1, "verdict": "MERGE", "mergedAt": "2026-09-07T10:00:00Z", "status": "clean" },
+    { "pr": 8, "kind": "bugfix", "agent": "claude-code", "model": "glm-5.2", "skill": "bugfix@1", "attempts": 3, "verdict": "MERGE", "mergedAt": "2026-09-08T10:00:00Z", "status": "clean" },
+    { "pr": 9, "kind": "bugfix", "agent": "claude-code", "model": "glm-5.2", "skill": "bugfix@1", "attempts": 1, "verdict": "MERGE", "mergedAt": "2026-09-09T10:00:00Z", "status": "clean" },
+    { "pr": 10, "kind": "bugfix", "agent": "claude-code", "model": "glm-5.2", "skill": "bugfix@1", "attempts": 1, "verdict": "MERGE", "mergedAt": "2026-09-10T10:00:00Z", "status": "clean" },
+    { "pr": 11, "kind": "refactor", "agent": "claude-code", "model": "glm-5.2", "skill": null, "attempts": 1, "verdict": "MERGE", "mergedAt": "2026-09-11T10:00:00Z", "status": "clean" },
+    { "pr": 12, "kind": "refactor", "agent": "claude-code", "model": "glm-5.2", "skill": null, "attempts": 1, "verdict": "MERGE", "mergedAt": "2026-09-12T10:00:00Z", "status": "clean" },
+    { "pr": 13, "kind": "refactor", "agent": "claude-code", "model": "glm-5.2", "skill": null, "attempts": 1, "verdict": "MERGE", "mergedAt": "2026-09-13T10:00:00Z", "status": "clean" },
+    { "pr": 14, "kind": "refactor", "agent": "claude-code", "model": "glm-5.2", "skill": null, "attempts": 1, "verdict": "MERGE", "mergedAt": "2026-09-14T10:00:00Z", "status": "clean" },
+    { "pr": 15, "kind": "refactor", "agent": "claude-code", "model": "glm-5.2", "skill": null, "attempts": 1, "verdict": "MERGE", "mergedAt": "2026-09-15T10:00:00Z", "status": "clean" },
+    { "pr": 16, "kind": "refactor", "agent": "claude-code", "model": "glm-5.2", "skill": null, "attempts": 2, "verdict": "MERGE", "mergedAt": "2026-09-16T10:00:00Z", "status": "clean" },
+    { "pr": 17, "kind": "refactor", "agent": "claude-code", "model": "glm-5.2", "skill": null, "attempts": 1, "verdict": "MERGE", "mergedAt": "2026-09-17T10:00:00Z", "status": "clean" },
+    { "pr": 18, "kind": "refactor", "agent": "claude-code", "model": "glm-5.2", "skill": null, "attempts": 1, "verdict": "MERGE", "mergedAt": "2026-09-18T10:00:00Z", "status": "clean" },
+    { "pr": 19, "kind": "refactor", "agent": "claude-code", "model": "glm-5.2", "skill": null, "attempts": 1, "verdict": "MERGE", "mergedAt": "2026-09-19T10:00:00Z", "status": "clean" },
+    { "pr": 20, "kind": "refactor", "agent": "claude-code", "model": "glm-5.2", "skill": null, "attempts": 1, "verdict": "MERGE", "mergedAt": "2026-09-20T10:00:00Z", "status": "clean" }
+  ]
+}

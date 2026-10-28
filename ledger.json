@@ -1,0 +1,19 @@
+{
+  "schema": "mergeproof-ledger@1",
+  "outcomes": [
+    {
+      "pr": 24,
+      "url": "https://github.com/ahmed-3m/mergeproof/pull/24",
+      "kind": "docs",
+      "agent": "claude-code",
+      "model": "claude-opus-5-5",
+      "skill": null,
+      "attempts": 1,
+      "verdict": "HUMAN",
+      "provenAt": "2026-10-28T19:49:39.427Z",
+      "mergedAt": null,
+      "mergeCommit": null,
+      "status": "open"
+    }
+  ]
+}

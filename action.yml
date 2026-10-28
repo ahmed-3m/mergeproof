@@ -1,0 +1,75 @@
+name: 'mergeproof'
+description: >-
+  Trust gate for AI-agent pull requests (zero dependencies, no LLM calls):
+  `check` gates a pull request, `apply` lands a verdict a gate job wrote, and
+  `sync` settles the trust ledger.
+author: 'ahmed-3m'
+
+branding:
+  icon: 'shield'
+  color: 'green'
+
+inputs:
+  command:
+    description: 'mergeproof command: check | apply | sync'
+    required: true
+  args:
+    description: 'Arguments for the command, space-separated. Passed through the environment and split without shell expansion.'
+    required: false
+    default: ''
+  node-version:
+    description: 'Node.js version to set up (>= 18.17)'
+    required: false
+    default: '22'
+
+outputs:
+  exit-code:
+    description: 'mergeproof exit code — 0 MERGE, 3 RETRY, 4 HUMAN (verdicts); 2 usage error, 1 other error'
+    value: ${{ steps.mergeproof.outputs.exit-code }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate the command
+      shell: bash
+      env:
+        MERGEPROOF_COMMAND: ${{ inputs.command }}
+      run: |
+        set -euo pipefail
+        case "$MERGEPROOF_COMMAND" in
+          check | apply | sync) ;;
+          *)
+            echo "::error::command must be check, apply or sync (got: $MERGEPROOF_COMMAND)"
+            exit 2
+            ;;
+        esac
+
+    # Pinned to the same commit as .github/workflows/ci.yml in the mergeproof repo.
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    # mergeproof has zero dependencies, so there is no install step: the CLI
+    # runs on Node built-ins alone.
+    - name: Run mergeproof
+      id: mergeproof
+      shell: bash
+      env:
+        MERGEPROOF_COMMAND: ${{ inputs.command }}
+        # args arrive through the environment, never through ${{ }} inside a
+        # run: script, so nothing they contain can be executed by a shell.
+        MERGEPROOF_ARGS: ${{ inputs.args }}
+      run: |
+        set -euo pipefail
+        # Split args into words with globbing off: no variable, glob or
+        # command expansion happens on them. -d '' reads the whole variable,
+        # not just its first line, and read returns 1 at the EOF it then hits.
+        set -f
+        read -r -d '' -a argv <<< "$MERGEPROOF_ARGS" || true
+        set +f
+        code=0
+        node "$GITHUB_ACTION_PATH/bin/mergeproof.mjs" "$MERGEPROOF_COMMAND" "${argv[@]}" || code=$?
+        # Workflows branch on the verdict: continue-on-error the step and read
+        # this output instead of guessing from failure/success.
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+        exit "$code"
