@@ -3,7 +3,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, rmSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { createRepo, testFile, FIXED_MATH, BASE_FILES } from './fixtures/repo.mjs';
 import { runCheck, evaluate, defaultDeps as checkDeps } from '../src/commands/check.mjs';
 import { runSync, settle, defaultDeps as syncDeps } from '../src/commands/sync.mjs';
@@ -292,6 +293,89 @@ test('a refactor that makes generated test cases disappear is tampering', () => 
     assert.equal(repo.git(['worktree', 'list']).split('\n').length, 1, 'proof worktrees are cleaned up');
   } finally {
     repo.cleanup();
+  }
+});
+
+// The bugfix fixture gated through evaluate() directly, with check's real deps
+// unless `over` replaces some.
+function evaluateFix({ repo, baseSha, headSha }, over = {}, testUser = null) {
+  return evaluate(
+    {
+      root: repo.dir, baseSha, headSha,
+      config: parseConfig(repo.git(['show', `${baseSha}:.mergeproof.json`])),
+      claims: { subjects: ['fix: mul by 3'] }, ci: null, issueLabels: ['bug'],
+      agent: 'claude-code', model: 'glm-5.2', ledger: readLedger(DEMO), testUser,
+    },
+    { ...checkDeps, ...over },
+  );
+}
+
+test('--test-user: worktrees go to the test user, and its processes die before they come back', () => {
+  const s = setup();
+  const calls = [];
+  const sandbox = {
+    makeHome: (user) => calls.push(['home', user]) && '/tmp/mp-home-fake',
+    claim: (dir, user) => calls.push(['claim', user]),
+    killAll: (user) => calls.push(['killAll', user]),
+    release: (dir) => calls.push(['release', dir === '/tmp/mp-home-fake' ? 'home' : 'tree']),
+  };
+  // The fake sandbox runs nothing as another user, so the tests run as us.
+  const runTests = (dir, opts) => {
+    calls.push(['run', opts.testUser?.user]);
+    return checkDeps.runTests(dir, { ...opts, testUser: null });
+  };
+  try {
+    const result = evaluateFix(s, { sandbox, runTests }, 'mp-tests');
+    assert.equal(result.verdict.verdict, 'MERGE', JSON.stringify(result.verdict));
+    const kinds = calls.map((c) => c[0]);
+    assert.deepEqual(kinds.slice(0, 3), ['home', 'claim', 'run'], 'a worktree is handed over before its first run');
+    assert.equal(kinds.filter((k) => k === 'claim').length, 2, 'base and head');
+    assert.ok(calls.filter((c) => c[0] === 'run').every((c) => c[1] === 'mp-tests'), 'every run is sandboxed');
+    const kill = kinds.indexOf('killAll');
+    assert.equal(kill, kinds.lastIndexOf('run') + 1, 'killed right after the last run');
+    assert.deepEqual(calls.slice(kill + 1).map((c) => c[1]), ['tree', 'tree', 'home'], 'then everything is taken back');
+    assert.equal(s.repo.git(['worktree', 'list']).split('\n').length, 1, 'proof worktrees are cleaned up');
+  } finally {
+    s.repo.cleanup();
+  }
+});
+
+test('--test-user must be a plain user name', async () => {
+  await assert.rejects(runCheck(['--local', '--test-user', 'root;id']), /--test-user must be a plain user name/);
+});
+
+// Real sudo: CI creates the user and sets MERGEPROOF_TEST_USER (Linux only).
+const TEST_USER = process.env.MERGEPROOF_TEST_USER;
+test('--test-user: a daemon a test forks is killed before the gate writes anything', { skip: !TEST_USER && 'set MERGEPROOF_TEST_USER to a sandbox user (CI does)' }, async () => {
+  const s = setup();
+  // World-writable, so only the kill (not file permissions) stops the write.
+  const drop = mkdtempSync(join(tmpdir(), 'mp-drop-'));
+  chmodSync(drop, 0o777);
+  const go = join(drop, 'go');
+  const forged = join(drop, 'forged');
+  // Waits for `go` (created after the gate is done), then writes `forged`.
+  const daemon = `const fs = require('fs'); setInterval(() => { if (fs.existsSync(${JSON.stringify(go)})) fs.writeFileSync(${JSON.stringify(forged)}, 'x'); }, 50);`;
+  s.repo.git(['checkout', '--quiet', 'agent/fix']);
+  s.repo.write({
+    'tests/mul.test.mjs': [
+      "import { spawn } from 'node:child_process';",
+      `spawn(process.execPath, ['-e', ${JSON.stringify(daemon)}], { detached: true, stdio: 'ignore' }).unref();`,
+      testFile('mul by 3', ['assert.equal(mul(3, 2), 6);']),
+    ].join('\n'),
+  });
+  const headSha = s.repo.commit('fix: mul by 3');
+  s.repo.git(['checkout', '--quiet', 'main']);
+  try {
+    const result = evaluateFix({ ...s, headSha }, {}, TEST_USER);
+    assert.equal(result.proof?.ok, true, JSON.stringify(result.verdict));
+    writeFileSync(go, '');
+    await new Promise((r) => setTimeout(r, 1000));
+    assert.equal(existsSync(forged), false, 'no process of the test user survived the proof');
+    assert.equal(spawnSync('pgrep', ['-u', TEST_USER]).status, 1, 'pgrep finds nothing');
+    assert.equal(s.repo.git(['worktree', 'list']).split('\n').length, 1, 'proof worktrees are taken back and removed');
+  } finally {
+    rmSync(drop, { recursive: true, force: true });
+    s.repo.cleanup();
   }
 });
 

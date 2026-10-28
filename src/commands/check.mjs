@@ -15,8 +15,9 @@ import { land } from '../land.mjs';
 import * as git from '../adapters/git.mjs';
 import * as gh from '../adapters/gh.mjs';
 import { runTests } from '../adapters/runner.mjs';
+import * as sandbox from '../adapters/sandbox.mjs';
 
-export const defaultDeps = { git, gh, runTests, now: () => new Date(), sleep: (ms) => new Promise((r) => setTimeout(r, ms)), cwd: () => process.cwd(), print: (s) => console.log(s) };
+export const defaultDeps = { git, gh, runTests, sandbox, now: () => new Date(), sleep: (ms) => new Promise((r) => setTimeout(r, ms)), cwd: () => process.cwd(), print: (s) => console.log(s) };
 
 // Worktrees are shared node_modules with the checkout: classification sends any
 // manifest change to `deps`, which is never tested, so base and head always have
@@ -56,29 +57,39 @@ function fingerprint(paths) {
  * The gate itself, PROTOTYPE.md flows 1-3:
  *   classifyKind → detectTampering → proveChange → decide.
  * Reads nothing from the PR's own config: `config` comes from the base branch.
+ * With `testUser` (check --test-user) the PR's tests run as that unprivileged
+ * OS user, and everything it still runs is killed before the proof is read.
  */
-export function evaluate({ root, baseSha, headSha, config, claims, ci, issueLabels = [], agent, model, ledger, ledgerPath = null }, deps = defaultDeps) {
+export function evaluate({ root, baseSha, headSha, config, claims, ci, issueLabels = [], agent, model, ledger, ledgerPath = null, testUser = null }, deps = defaultDeps) {
   const { kind, files, testFiles, tamperNotes } = inspect({ root, baseSha, headSha, config, claims, issueLabels }, deps);
   if (tamperNotes.length > 0) return { kind, files, tamperNotes, proof: null, verdict: decide({ kind, tamperNotes }) };
 
   const newTests = files.filter((f) => f.status === 'A' && testFiles.includes(f.path)).map((f) => f.path);
   const trees = {};
+  let sandboxed = null; // { user, home } once the first worktree is handed over
   const tree = (which) => {
     if (!trees[which]) {
       const dir = deps.git.addWorktree(root, which === 'base' ? baseSha : headSha);
       trees[which] = dir;
       if (which === 'base') deps.git.checkoutFiles(dir, headSha, newTests);
       linkNodeModules(root, dir);
+      if (testUser) {
+        sandboxed ??= { user: testUser, home: deps.sandbox.makeHome(testUser) };
+        deps.sandbox.claim(dir, testUser);
+      }
     }
     return trees[which];
   };
-  const runner = (which) => (only) =>
-    deps.runTests(tree(which), {
+  const runner = (which) => (only) => {
+    const dir = tree(which);
+    return deps.runTests(dir, {
       testCommand: config.testCommand,
       testFileCommand: config.testFileCommand,
       only,
       timeoutSec: config.limits.testTimeoutSec,
+      testUser: sandboxed,
     });
+  };
   const guarded = guardedPaths(deps.git.commonDir(root), ledgerPath);
   const before = fingerprint(guarded);
   let proof;
@@ -86,6 +97,13 @@ export function evaluate({ root, baseSha, headSha, config, claims, ci, issueLabe
   try {
     proof = proveChange(kind, { files, config, ci, runBase: runner('base'), runHead: runner('head') });
   } finally {
+    // Nothing the tests started may outlive the proof: kill it, then take the
+    // worktrees back, before the fingerprint is compared.
+    if (sandboxed) {
+      deps.sandbox.killAll(testUser);
+      for (const dir of [...Object.values(trees), sandboxed.home]) deps.sandbox.release(dir);
+      rmSync(sandboxed.home, { recursive: true, force: true });
+    }
     tampered = fingerprint(guarded) !== before;
     for (const dir of Object.values(trees)) {
       if (tampered) rmSync(dir, { recursive: true, force: true });
@@ -109,7 +127,9 @@ export function evaluate({ root, baseSha, headSha, config, claims, ci, issueLabe
 //   loadConfig → classifyKind → detectTampering → proveChange → decide
 //   → (enforce mode) merge with trailer → appendOutcome to the ledger
 export async function runCheck(argv, deps = defaultDeps) {
-  const { positionals, flags } = parseFlags(argv, ['local', 'dry-run', 'json'], ['base', 'agent', 'model', 'skill', 'attempt', 'issue', 'ledger', 'verdict-out', 'head']);
+  const { positionals, flags } = parseFlags(argv, ['local', 'dry-run', 'json'], ['base', 'agent', 'model', 'skill', 'attempt', 'issue', 'ledger', 'verdict-out', 'head', 'test-user']);
+  const testUser = flags['test-user'];
+  if (testUser !== null && !deps.sandbox.TEST_USER.test(testUser)) throw new UsageError('--test-user must be a plain user name');
   if (flags.local && positionals.length > 0) {
     throw new UsageError('use either <pr-url> or --local, not both');
   }
@@ -136,6 +156,12 @@ export async function runCheck(argv, deps = defaultDeps) {
   if (prUrl && !gh.parsePrUrl(prUrl)) throw new UsageError(`not a pull request URL: ${prUrl}`);
 
   const root = deps.git.topLevel(deps.cwd());
+  // Before anything is fetched or run: the test user exists, sudo needs no
+  // password, and it can read the node_modules every worktree links to.
+  if (testUser !== null) {
+    const modules = join(root, 'node_modules');
+    deps.sandbox.check(testUser, existsSync(modules) ? [modules] : []);
+  }
   const ledgerPath = resolve(root, flags.ledger ?? DEFAULT_LEDGER);
   let input;
   let pr = null;
@@ -221,7 +247,7 @@ export async function runCheck(argv, deps = defaultDeps) {
     if (input.ci === 'pending') {
       input.ci = await gh.waitForChecks(prUrl, input.headSha, { timeoutSec: config.limits.ciWaitSec, sleep: deps.sleep, read: deps.gh.getChecksStatus });
     }
-    result = evaluate({ root, ...input, config, ledger, ledgerPath }, deps);
+    result = evaluate({ root, ...input, config, ledger, ledgerPath, testUser }, deps);
   }
   const { verdict } = result;
 

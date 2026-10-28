@@ -30,6 +30,7 @@ Options:
   --issue <n>                     issue the agent was dispatched for; its bugfix label picks the bucket
   --head <sha>                    check/apply: the head whose CI completed; a PR that moved since stands down for its own new run
   --verdict-out <file>            check: write the verdict for an apply job, write nothing to GitHub
+  --test-user <name>              check: run the PR's tests as this unprivileged OS user (sudo; Linux/macOS)
   --ledger <path>                 default .mergeproof/ledger.json
   --ref <ref>                     sync: branch whose history is scanned (default HEAD)
   --harness <name>                dispatch: local coding agent to run (phase 1: agy); its login comes from agents.identities on the base branch, and the identity account's PAT must be in the MERGEPROOF_DISPATCH_TOKEN environment variable
