@@ -1,0 +1,44 @@
+{
+  "mode": "shadow",
+  "paths": {
+    "agentInstructions": [
+      "AGENTS.md",
+      "AGENT.md",
+      "CLAUDE.md",
+      "CLAUDE.local.md",
+      "GEMINI.md",
+      "CONVENTIONS.md",
+      ".cursorrules",
+      ".windsurfrules",
+      ".clinerules",
+      ".roorules",
+      "**/.clinerules/**",
+      "**/.cursor/**",
+      "**/.windsurf/**",
+      "**/.claude/**",
+      "**/.gemini/**",
+      "**/.codex/**",
+      "**/.agents/**",
+      "**/.roo/**",
+      "**/.junie/**",
+      "**/.kiro/**",
+      ".aider*",
+      ".github/copilot-instructions.md",
+      "skills/**"
+    ]
+  },
+  "agents": {
+    "logins": [
+      "ahmed-3m"
+    ],
+    "branchPrefixes": [
+      "agent/"
+    ],
+    "identities": {
+      "ahmed-3m": {
+        "agent": "claude-code",
+        "model": "claude-opus-5-5"
+      }
+    }
+  }
+}
