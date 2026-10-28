@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { parseFlags } from '../args.mjs';
 import { UsageError } from '../errors.mjs';
 import { CONFIG_FILE, parseConfig } from '../config.mjs';
@@ -21,9 +21,9 @@ export const defaultDeps = { git, gh, runTests, sandbox, now: () => new Date(), 
 
 // Worktrees are shared node_modules with the checkout: classification sends any
 // manifest change to `deps`, which is never tested, so base and head always have
-// the same dependencies when tests run.
-function linkNodeModules(root, dir) {
-  const src = join(root, 'node_modules');
+// the same dependencies when tests run. `src` is the checkout's node_modules,
+// or under --test-user a mirror of it the test user can read.
+function linkNodeModules(src, dir) {
   if (existsSync(src) && !existsSync(join(dir, 'node_modules'))) symlinkSync(src, join(dir, 'node_modules'), 'junction');
 }
 
@@ -66,16 +66,23 @@ export function evaluate({ root, baseSha, headSha, config, claims, ci, issueLabe
 
   const newTests = files.filter((f) => f.status === 'A' && testFiles.includes(f.path)).map((f) => f.path);
   const trees = {};
-  let sandboxed = null; // { user, home } once the first worktree is handed over
+  let sandboxed = null; // { user, home, modules } once the first worktree is handed over
   const tree = (which) => {
     if (!trees[which]) {
       const dir = deps.git.addWorktree(root, which === 'base' ? baseSha : headSha);
       trees[which] = dir;
       if (which === 'base') deps.git.checkoutFiles(dir, headSha, newTests);
-      linkNodeModules(root, dir);
+      const modules = join(root, 'node_modules');
       if (testUser) {
-        sandboxed ??= { user: testUser, home: deps.sandbox.makeHome(testUser) };
+        sandboxed ??= {
+          user: testUser,
+          home: deps.sandbox.makeHome(testUser),
+          modules: existsSync(modules) ? deps.sandbox.shareModules(modules) : null,
+        };
+        if (sandboxed.modules) linkNodeModules(sandboxed.modules, dir);
         deps.sandbox.claim(dir, testUser);
+      } else {
+        linkNodeModules(modules, dir);
       }
     }
     return trees[which];
@@ -103,6 +110,7 @@ export function evaluate({ root, baseSha, headSha, config, claims, ci, issueLabe
       deps.sandbox.killAll(testUser);
       for (const dir of [...Object.values(trees), sandboxed.home]) deps.sandbox.release(dir);
       rmSync(sandboxed.home, { recursive: true, force: true });
+      if (sandboxed.modules) rmSync(dirname(sandboxed.modules), { recursive: true, force: true });
     }
     tampered = fingerprint(guarded) !== before;
     for (const dir of Object.values(trees)) {
@@ -156,12 +164,8 @@ export async function runCheck(argv, deps = defaultDeps) {
   if (prUrl && !gh.parsePrUrl(prUrl)) throw new UsageError(`not a pull request URL: ${prUrl}`);
 
   const root = deps.git.topLevel(deps.cwd());
-  // Before anything is fetched or run: the test user exists, sudo needs no
-  // password, and it can read the node_modules every worktree links to.
-  if (testUser !== null) {
-    const modules = join(root, 'node_modules');
-    deps.sandbox.check(testUser, existsSync(modules) ? [modules] : []);
-  }
+  // Before anything is fetched or run: the test user exists and sudo needs no password.
+  if (testUser !== null) deps.sandbox.check(testUser);
   const ledgerPath = resolve(root, flags.ledger ?? DEFAULT_LEDGER);
   let input;
   let pr = null;

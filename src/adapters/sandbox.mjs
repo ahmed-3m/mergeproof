@@ -1,6 +1,6 @@
-import { mkdtempSync } from 'node:fs';
+import { chmodSync, copyFileSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readlinkSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import { runProcess } from './process.mjs';
 
 // `check --test-user <name>`: PR test code runs as a separate, unprivileged OS
@@ -26,20 +26,51 @@ function sudo(args, { allowFail = false } = {}) {
   return res;
 }
 
-/**
- * Fail fast, before any PR code runs, when the user or passwordless sudo is
- * missing, or when the test user cannot read `readable` (the checkout's
- * node_modules, which every proof worktree links to).
- */
-export function check(user, readable = []) {
+/** Fail fast, before any PR code runs, when the user or passwordless sudo is missing. */
+export function check(user) {
   if (process.platform === 'win32') throw new Error('--test-user needs Linux or macOS (sudo); Windows is not supported');
   if (!TEST_USER.test(user)) throw new Error(`--test-user ${JSON.stringify(user)} is not a plain user name`);
   sudo(['-u', user, '--', 'true']);
-  for (const path of readable) {
-    if (sudo(['-u', user, '--', 'test', '-r', path, '-a', '-x', path], { allowFail: true }).code !== 0) {
-      throw new Error(`test user ${user} cannot read ${path}; make its parent directories traversable (chmod o+x)`);
+}
+
+function mirror(src, dst, top) {
+  mkdirSync(dst);
+  chmodSync(dst, 0o755);
+  for (const entry of readdirSync(src, { withFileTypes: true })) {
+    const from = join(src, entry.name);
+    const to = join(dst, entry.name);
+    if (entry.isSymbolicLink()) {
+      // .bin links stay relative; one that leaves node_modules (a workspace
+      // package) keeps pointing at the original.
+      const target = readlinkSync(from);
+      const inside = !isAbsolute(target) && !relative(top, resolve(src, target)).startsWith('..');
+      symlinkSync(inside ? target : resolve(src, target), to);
+    } else if (entry.isDirectory()) {
+      mirror(from, to, top);
+    } else {
+      try {
+        linkSync(from, to);
+      } catch (err) {
+        if (err.code !== 'EXDEV' && err.code !== 'EPERM') throw err;
+        copyFileSync(from, to);
+      }
     }
   }
+}
+
+/**
+ * The checkout usually sits under the gate user's home, which the test user
+ * cannot traverse (0750 on GitHub-hosted runners), so worktrees cannot link
+ * the checkout's node_modules. Mirror it into a temp dir the test user can
+ * read instead: fresh directories, hard links for files (no copy, and still
+ * owned by the gate user, so read-only to the tests). Remove it with rmSync.
+ * @returns {string} the mirrored node_modules
+ */
+export function shareModules(modules) {
+  const dir = mkdtempSync(join(tmpdir(), 'mergeproof-modules-'));
+  chmodSync(dir, 0o755);
+  mirror(modules, join(dir, 'node_modules'), modules);
+  return join(dir, 'node_modules');
 }
 
 /** A scratch HOME owned by the test user (npm and friends write caches there). */

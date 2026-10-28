@@ -1,9 +1,10 @@
 // check and sync as commands: real git repos, a fake `gh`, a captured printer.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import * as sandbox from '../src/adapters/sandbox.mjs';
 import { tmpdir } from 'node:os';
 import { createRepo, testFile, FIXED_MATH, BASE_FILES } from './fixtures/repo.mjs';
 import { runCheck, evaluate, defaultDeps as checkDeps } from '../src/commands/check.mjs';
@@ -340,6 +341,25 @@ test('--test-user: worktrees go to the test user, and its processes die before t
   }
 });
 
+test('--test-user: node_modules is mirrored with hard links, readable, links kept', { skip: process.platform === 'win32' && 'symlinks need privileges on Windows' }, () => {
+  const src = mkdtempSync(join(tmpdir(), 'mp-modules-'));
+  mkdirSync(join(src, 'node_modules/pkg/bin'), { recursive: true });
+  mkdirSync(join(src, 'node_modules/.bin'));
+  writeFileSync(join(src, 'node_modules/pkg/bin/run.js'), 'run');
+  symlinkSync('../pkg/bin/run.js', join(src, 'node_modules/.bin/run'));
+  symlinkSync('../../outside', join(src, 'node_modules/escape'));
+  const shared = sandbox.shareModules(join(src, 'node_modules'));
+  try {
+    assert.equal(readFileSync(join(shared, '.bin/run'), 'utf8'), 'run', 'a relative .bin link still resolves');
+    assert.equal(statSync(join(shared, 'pkg/bin/run.js')).ino, statSync(join(src, 'node_modules/pkg/bin/run.js')).ino, 'files are hard links, not copies');
+    assert.equal(readlinkSync(join(shared, 'escape')), resolve(src, 'outside'), 'a link leaving node_modules points at the original');
+    assert.equal(statSync(dirname(shared)).mode & 0o777, 0o755, 'the mirror is traversable by the test user');
+  } finally {
+    rmSync(dirname(shared), { recursive: true, force: true });
+    rmSync(src, { recursive: true, force: true });
+  }
+});
+
 test('--test-user must be a plain user name', async () => {
   await assert.rejects(runCheck(['--local', '--test-user', 'root;id']), /--test-user must be a plain user name/);
 });
@@ -360,11 +380,19 @@ test('--test-user: a daemon a test forks is killed before the gate writes anythi
     'tests/mul.test.mjs': [
       "import { spawn } from 'node:child_process';",
       `spawn(process.execPath, ['-e', ${JSON.stringify(daemon)}], { detached: true, stdio: 'ignore' }).unref();`,
-      testFile('mul by 3', ['assert.equal(mul(3, 2), 6);']),
+      "import { three } from 'three';",
+      testFile('mul by 3', ['assert.equal(mul(three, 2), 6);']),
     ].join('\n'),
   });
+  rmSync(s.ledger); // untracked: keep it out of the commit (evaluateFix reads the demo ledger)
   const headSha = s.repo.commit('fix: mul by 3');
   s.repo.git(['checkout', '--quiet', 'main']);
+  // An untracked node_modules in the checkout (0700 temp dir, like a runner
+  // home the test user cannot traverse): the tests import from it via the mirror.
+  s.repo.write({
+    'node_modules/three/index.mjs': 'export const three = 3;\n',
+    'node_modules/three/package.json': '{ "name": "three", "type": "module", "exports": "./index.mjs" }\n',
+  });
   try {
     const result = evaluateFix({ ...s, headSha }, {}, TEST_USER);
     assert.equal(result.proof?.ok, true, JSON.stringify(result.verdict));
