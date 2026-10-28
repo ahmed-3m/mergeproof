@@ -131,19 +131,31 @@ export function commitSubjects(repoRoot, base, head) {
   return out(repoRoot, ['log', '--format=%s', `${base}..${head}`]).split('\n').filter(Boolean);
 }
 
-/** Every file path in the tree at `sha`. */
+/** [{ path, symlink }] for every file in the tree at `sha`. */
 export function listFiles(repoRoot, sha) {
-  return git(repoRoot, ['ls-tree', '-r', '-z', '--name-only', sha]).stdout.split('\0').filter(Boolean);
+  return git(repoRoot, ['ls-tree', '-r', '-z', sha]).stdout.split('\0').filter(Boolean).map((entry) => {
+    const tab = entry.indexOf('\t');
+    return { path: entry.slice(tab + 1), symlink: entry.startsWith('120000 ') };
+  });
 }
 
-/** [{ path, line }] for lines at `sha` matching the extended regex, in text files under `pathspecs`. */
-export function grep(repoRoot, sha, pattern, pathspecs) {
-  const res = git(repoRoot, ['grep', '-I', '-z', '-E', '-e', pattern, sha, '--', ...pathspecs], { allowFail: true });
-  if (res.code !== 0) return []; // 1 is "no match"
+/**
+ * [{ path, line }] for lines at `sha` matching the extended regex, in the
+ * text files at the exact `paths`. The output format is pinned with flags (a
+ * repo's grep.lineNumber or grep.column would add fields), and a line that
+ * still doesn't parse throws instead of being skipped.
+ */
+export function grep(repoRoot, sha, pattern, paths) {
+  if (paths.length === 0) return [];
+  const args = ['grep', '-I', '-z', '--no-line-number', '--no-column', '--no-color', '--full-name', '-E', '-e', pattern, sha, '--'];
+  const res = git(repoRoot, [...args, ...paths.map((p) => `:(literal)${p}`)], { allowFail: true });
+  if (res.code === 1 && !res.stderr.trim()) return []; // no match
+  if (res.code !== 0) throw new Error(`git grep failed: ${(res.stderr || res.stdout).trim().split('\n')[0]}`);
   const prefix = `${sha}:`;
   return res.stdout.split('\n').filter(Boolean).map((l) => {
     const at = l.indexOf('\0');
-    return { path: l.slice(0, at).replace(prefix, ''), line: l.slice(at + 1) };
+    if (!l.startsWith(prefix) || at < 0) throw new Error(`git grep: unexpected output ${JSON.stringify(l.slice(0, 80))}`);
+    return { path: l.slice(prefix.length, at), line: l.slice(at + 1) };
   });
 }
 

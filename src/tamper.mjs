@@ -61,19 +61,24 @@ function first(items, describe) {
 const isTest = (ctx, p) => p != null && matchesAny(p, ctx.config.paths.tests);
 
 // Paths an instruction file imports with `@path` (CLAUDE.md, GEMINI.md), resolved
-// against its directory. Loose on purpose: an npm scope or a decorator that is
-// not really an import only protects one more path. `@~/...` and paths that
-// leave the repo are skipped.
-const IMPORT = /(?:^|\s)@([A-Za-z0-9_.][A-Za-z0-9_./-]*)/g;
+// against its directory. The token is read the way Claude Code reads it: any
+// run of non-space characters, with `\ ` for a space. Loose on purpose: an npm
+// scope or a decorator that is not really an import only protects one more
+// path, so a token ending in punctuation protects both readings. `@~/...`,
+// absolute paths and paths that leave the repo are skipped.
+const IMPORT = /(?:^|\s)@((?:[^\s\\]|\\.)+)/g;
 
 export function instructionImports(text, fromPath) {
   const dir = posix.dirname(fromPath);
   const paths = [];
   for (const m of text.matchAll(IMPORT)) {
-    const raw = m[1].replace(/[.,;:]+$/, '');
-    if (!raw) continue;
-    const p = posix.normalize(posix.join(dir, raw)).replace(/\/$/, '');
-    if (p !== '.' && p !== '..' && !p.startsWith('../')) paths.push(p);
+    const token = m[1].replace(/\\(.)/g, '$1');
+    if (token.startsWith('~') || token.startsWith('/')) continue;
+    for (const raw of new Set([token, token.replace(/[.,;:!?)\]'"`]+$/, '')])) {
+      if (!raw) continue;
+      const p = posix.normalize(posix.join(dir, raw)).replace(/\/$/, '');
+      if (p !== '.' && p !== '..' && !p.startsWith('../') && !paths.includes(p)) paths.push(p);
+    }
   }
   return paths;
 }
