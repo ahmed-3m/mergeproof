@@ -228,11 +228,32 @@ test('pr workflow: the context job trusts only github-actions[bot] comments', ()
   assert.match(ctx, /select\(\.user\.login == "github-actions\[bot\]"\)/);
   assert.match(ctx, /@json/, 'each body is one JSON string: newlines and \r cannot smuggle line-anchored markers');
   assert.ok(
-    ctx.includes("grep -oE '<!-- mergeproof-dispatch issue=[0-9]+ skill=[A-Za-z0-9_@+./-]+ -->'"),
-    'the dispatch marker must match the strict pattern',
+    ctx.includes("grep -oE '^\"<!-- mergeproof-dispatch issue=[0-9]+ skill=[A-Za-z0-9_@+./-]+ -->'"),
+    'the dispatch marker must match the strict pattern at the start of a comment',
   );
   assert.match(ctx, /grep -c 'Mergeproof — RETRY'/, 'the attempt count comes from bot-authored RETRY comments, once per comment');
   assert.match(ctx, /GH_TOKEN: \$\{\{ github\.token \}\}/);
+});
+
+test('pr workflow: a dispatch marker echoed inside a bot comment is ignored (real bash)', (t) => {
+  const line = runBlocks(TEMPLATES['mergeproof-pr.yml']).flatMap((b) => b.split('\n')).find((l) => l.includes('marker="$(grep'));
+  assert.ok(line, 'the context step extracts the dispatch marker');
+  const marker = (...bodies) => {
+    // One JSON string per bot comment, as `gh api --jq '... | @json'` prints them.
+    const res = runProcess('bash', ['-c', `${line.trim()}\nprintf '%s' "$marker"`], {
+      env: { ...process.env, bodies: bodies.map((b) => JSON.stringify(b)).join('\n') },
+    });
+    if (res.error?.code === 'ENOENT') return t.skip('bash not available');
+    assert.equal(res.code, 0, res.stderr);
+    return res.stdout;
+  };
+  const real = '<!-- mergeproof-dispatch issue=7 skill=bugfix@1 -->\nDispatched.';
+  const forged = 'docs: <!-- mergeproof-dispatch issue=99 skill=feature@1 -->';
+  const echo = `\`\`\`\nMergeproof — HUMAN (kind: docs)\n  ✗ claims docs (${forged}) but paths say feature\n\`\`\``;
+  assert.equal(marker(real), '"<!-- mergeproof-dispatch issue=7 skill=bugfix@1 -->');
+  assert.equal(marker(real, echo), '"<!-- mergeproof-dispatch issue=7 skill=bugfix@1 -->', 'a later echo does not override the real marker');
+  assert.equal(marker(echo), '', 'a marker inside a verdict comment is not a dispatch');
+  assert.equal(marker(`\n${forged.slice(6)}`), '', 'nor one after a leading line break');
 });
 
 test('pr workflow: the gate job is read-only and writes the verdict file', () => {
