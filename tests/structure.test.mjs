@@ -60,7 +60,7 @@ const CONTRACT = {
   'src/commands/init.mjs': ['runInit', 'detect'],
   'src/commands/dispatch.mjs': ['runDispatch', 'buildIssueFile', 'agentPrompt', 'agentEnv', 'HARNESS_BIN', 'TOKEN_ENV'],
   'src/adapters/process.mjs': ['runProcess'],
-  'src/adapters/git.mjs': ['changedFiles', 'changedPaths', 'diff', 'addedLines', 'addWorktree', 'removeWorktree', 'addBranchWorktree', 'refExists', 'commonDir', 'log'],
+  'src/adapters/git.mjs': ['changedFiles', 'changedPaths', 'diff', 'addedLines', 'addWorktree', 'removeWorktree', 'addBranchWorktree', 'refExists', 'commonDir', 'log', 'patchId'],
   'src/adapters/gh.mjs': ['getPullRequest', 'getChecksStatus', 'waitForChecks', 'issueLabels', 'squashMerge', 'comment', 'createIssue', 'addLabel', 'repoView', 'createLabel', 'setVariable', 'setSecret', 'apiJson', 'branchExists', 'redactSecret', 'getIssue', 'issueComments', 'collaboratorPermission'],
   'src/adapters/runner.mjs': ['runTests', 'parseTestCount'],
 };
