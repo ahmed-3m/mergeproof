@@ -10,8 +10,10 @@ import { matchesAny } from './glob.mjs';
 //   deps             only manifests and lockfiles changed (never auto-merged, so no tests run)
 // Every kind also needs CI green. Without a CI result (local preflight, or a repo
 // with no checks) the full suite runs on head instead, with proof.headReruns
-// reruns before a failure counts. A refactor always runs the head suite, even
-// with CI: flow 2 needs green on base and head, and the case count is compared.
+// reruns before a failure counts. CI still pending (after the caller's wait) is
+// blocked, not weak: the agent cannot fix a slow workflow, so it is HUMAN. A
+// refactor always runs the head suite, even with CI: flow 2 needs green on
+// base and head, and the case count is compared.
 //
 // ctx: {
 //   files: [{ path, status }], config,
@@ -54,12 +56,20 @@ function ciNote(ctx, head = null) {
   return suite.green ? pass('full suite green on head') : fail('full suite fails on head');
 }
 
+// A new helper, fixture or snapshot under a test glob is not a test of its
+// own: run alone it "passes" on base, which would make the proof weak.
+// paths.testSupport names them; they still count as test paths for the kind.
+// A file named like a test is always one, even in a support directory
+// (tests/helpers/date.test.js tests src/helpers/date.js).
+const TEST_NAMES = ['**/*.test.*', '**/*.spec.*'];
+const isSupport = (p, config) => !matchesAny(p, TEST_NAMES) && matchesAny(p, config.paths.testSupport);
+
 function proveNewTests(ctx) {
   const { baseFailRuns, headPassRuns } = ctx.config.proof;
   const newTests = ctx.files
     .filter((f) => f.status === 'A' && matchesAny(f.path, ctx.config.paths.tests))
     .map((f) => f.path)
-    .filter((p) => !matchesAny(p, ctx.config.quarantine));
+    .filter((p) => !matchesAny(p, ctx.config.quarantine) && !isSupport(p, ctx.config));
   if (newTests.length === 0) return [fail('no new test file to prove the change')];
 
   const baseFails = Object.fromEntries(newTests.map((t) => [t, 0]));
@@ -98,7 +108,7 @@ export function proveChange(kind, ctx) {
           : pass('only manifests and lockfiles changed'),
       ]);
     case 'docs':
-      return result([pass('only docs changed'), ciNote(ctx)]);
+      return result([pass('only docs changed'), ciNote(ctx)], { blocked: ctx.ci === 'pending' });
     case 'refactor': {
       if (b.tests.length > 0) return result([fail('a refactor must not change test files')]);
       const base = ctx.runBase(null);
@@ -115,13 +125,14 @@ export function proveChange(kind, ctx) {
         base.count != null && head.run.count != null && head.run.count < base.count
           ? [{ ok: false, rule: 'testCountDropped', text: `test count dropped from ${base.count} on base to ${head.run.count} on head` }]
           : [];
-      return result(notes, { tamperNotes: dropped }); // unknown counts: no note, any runner works
+      // unknown counts: no note, any runner works
+      return result(notes, { blocked: head.green && ctx.ci === 'pending', tamperNotes: dropped });
     }
     case 'feature':
     case 'bugfix': {
       const proof = proveNewTests(ctx);
       if (proof.some((n) => !n.ok)) return result(proof);
-      return result([...proof, ciNote(ctx)]);
+      return result([...proof, ciNote(ctx)], { blocked: ctx.ci === 'pending' });
     }
     default:
       return result([fail('changes fit no single kind (tests only, or nothing)')], { blocked: true });

@@ -7,7 +7,7 @@ import { copyFileSync, mkdirSync, rmSync } from 'node:fs';
 import { createRepo, testFile, FIXED_MATH, BASE_FILES } from './fixtures/repo.mjs';
 import { runCheck, evaluate, defaultDeps as checkDeps } from '../src/commands/check.mjs';
 import { runSync, settle, defaultDeps as syncDeps } from '../src/commands/sync.mjs';
-import { checksState, normalizePr, parsePrUrl } from '../src/adapters/gh.mjs';
+import { checksState, normalizePr, parsePrUrl, waitForChecks } from '../src/adapters/gh.mjs';
 import { parseConfig } from '../src/config.mjs';
 import { emptyLedger, readLedger, writeLedger, LEDGER_SCHEMA } from '../src/ledger.mjs';
 import { parseTrailer } from '../src/trailer.mjs';
@@ -306,6 +306,43 @@ test('gh output is normalized and CI collapses to one state', () => {
   assert.equal(checksState([{ name: 'ci', status: 'COMPLETED', conclusion: 'SUCCESS' }, { name: 'e2e', status: 'COMPLETED', conclusion: 'TIMED_OUT' }]), 'red');
   assert.deepEqual(parsePrUrl(URL), { host: 'github.com', repo: 'acme/app', number: 77 });
   assert.equal(parsePrUrl('https://github.com/acme/app/issues/77'), null);
+});
+
+test('waitForChecks re-reads pending CI until it settles, the wait runs out, or the head moves', async () => {
+  const slept = [];
+  const sleep = async (ms) => slept.push(ms);
+  const reads = [];
+  const seq = (...states) => (url, sha) => (reads.push([url, sha]), states.shift());
+  assert.equal(await waitForChecks(URL, 'h1', { timeoutSec: 600, sleep, read: seq('pending', 'green') }), 'green');
+  assert.deepEqual(reads, [[URL, 'h1'], [URL, 'h1']], 'every read is pinned to the gated head');
+  assert.deepEqual(slept, [30000, 30000]);
+  slept.length = 0;
+  assert.equal(await waitForChecks(URL, 'h1', { timeoutSec: 70, sleep, read: () => 'pending' }), 'pending');
+  assert.deepEqual(slept, [30000, 30000, 10000], 'never waits past timeoutSec');
+  assert.equal(await waitForChecks(URL, 'h1', { timeoutSec: 600, sleep, read: seq('moved') }), 'pending', 'a moved head never has its CI counted for this commit');
+  slept.length = 0;
+  assert.equal(await waitForChecks(URL, 'h1', { timeoutSec: 0, sleep, read: () => assert.fail('no read without a wait') }), 'pending');
+  assert.deepEqual(slept, [], 'ciWaitSec 0 turns the wait off');
+});
+
+test('check waits for CI from other workflows; CI that never finishes is HUMAN, not RETRY', async () => {
+  const { repo, baseSha, headSha } = setup();
+  try {
+    const gh = fakeGh(repo, { baseSha, headSha, checks: [{ name: 'e2e', status: 'IN_PROGRESS' }] });
+    const reads = [];
+    gh.getChecksStatus = (url, sha) => (reads.push(sha), reads.length < 2 ? 'pending' : 'green');
+    const out = [];
+    const noWait = async () => {};
+    assert.equal(await runCheck([URL, ...PR_ARGS, '--dry-run'], { ...deps(repo, gh, out), sleep: noWait }), 0, out.join('\n'));
+    assert.deepEqual(reads, [headSha, headSha]);
+    assert.match(out[0], /MERGE \(kind: bugfix\)/);
+    gh.getChecksStatus = () => 'pending';
+    out.length = 0;
+    assert.equal(await runCheck([URL, ...PR_ARGS, '--dry-run'], { ...deps(repo, gh, out), sleep: noWait }), 4, out.join('\n'));
+    assert.match(out[0], /HUMAN \(kind: bugfix\)[\s\S]*CI has not finished/);
+  } finally {
+    repo.cleanup();
+  }
 });
 
 const DAY = 24 * 3600 * 1000;

@@ -48,6 +48,8 @@ test('invalid config fails loudly with the offending key', () => {
     ['{ "trust": { "minCleanRate": 1.5 } }', /"trust.minCleanRate"/],
     ['{ "paths": { "tests": "tests/**" } }', /must be an array/],
     ['{ "paths": { "tests": [""] } }', /non-empty strings/],
+    ['{ "paths": { "testSupport": [""] } }', /"paths.testSupport" must contain only non-empty strings/],
+    ['{ "limits": { "ciWaitSec": -1 } }', /"limits.ciWaitSec" must be an integer from 0 to 3600/],
     ['{ "paths": null }', /"paths" must be an object/],
     ['{ "testCommand": "  " }', /must not be empty/],
     ['{ "agents": { "identities": [] } }', /"agents.identities" must be an object, got array/],

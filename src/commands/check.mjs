@@ -16,7 +16,7 @@ import * as git from '../adapters/git.mjs';
 import * as gh from '../adapters/gh.mjs';
 import { runTests } from '../adapters/runner.mjs';
 
-export const defaultDeps = { git, gh, runTests, now: () => new Date(), cwd: () => process.cwd(), print: (s) => console.log(s) };
+export const defaultDeps = { git, gh, runTests, now: () => new Date(), sleep: (ms) => new Promise((r) => setTimeout(r, ms)), cwd: () => process.cwd(), print: (s) => console.log(s) };
 
 // Worktrees are shared node_modules with the checkout: classification sends any
 // manifest change to `deps`, which is never tested, so base and head always have
@@ -216,6 +216,11 @@ export async function runCheck(argv, deps = defaultDeps) {
   } else if (notAgent) {
     result = { verdict: makeVerdict('HUMAN', { notes: [{ ok: false, text: notAgent }] }) };
   } else {
+    // CI from other workflows may still be running; wait for it (limits.ciWaitSec)
+    // rather than judge a commit whose CI has not finished.
+    if (input.ci === 'pending') {
+      input.ci = await gh.waitForChecks(prUrl, input.headSha, { timeoutSec: config.limits.ciWaitSec, sleep: deps.sleep, read: deps.gh.getChecksStatus });
+    }
     result = evaluate({ root, ...input, config, ledger, ledgerPath }, deps);
   }
   const { verdict } = result;
