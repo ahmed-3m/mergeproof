@@ -1,6 +1,6 @@
 {
   "name": "@ahmed-3m/mergeproof",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Let AI agents merge, only with proof. A zero-dependency trust gate for AI-agent pull requests.",
   "type": "module",
   "license": "MIT",
