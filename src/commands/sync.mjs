@@ -10,31 +10,60 @@ export const defaultDeps = { git, gh, now: () => new Date(), cwd: () => process.
 
 const DAY = 24 * 60 * 60 * 1000;
 
-/** { mergeCommitSha: revertCommit } for every `git revert` in the history. */
+// A revert is found three ways, so one squashed under another message or
+// made by hand still counts:
+//   shas  "This reverts commit <sha>" (git revert)
+//   prs   "Reverts owner/repo#N" on a line of its own (GitHub's revert PR body,
+//         kept when the revert PR is squashed with its description)
+//   content  a later commit whose change is the exact undo of the merge
+//            (same stable patch id), whatever its message
+// A false match only marks an outcome reverted, which costs trust, never adds it.
 export function findReverts(commits) {
-  const reverts = new Map();
+  const shas = new Map();
+  const prs = new Map();
   for (const c of commits) {
     for (const m of c.message.matchAll(/This reverts commit ([0-9a-f]{7,40})/g)) {
-      if (!reverts.has(m[1])) reverts.set(m[1], c);
+      if (!shas.has(m[1])) shas.set(m[1], c);
+    }
+    for (const m of c.message.matchAll(/^Reverts (?:([\w.-]+\/[\w.-]+))?#(\d+)[ \t]*$/gm)) {
+      const key = `${(m[1] ?? '').toLowerCase()}#${m[2]}`;
+      if (!prs.has(key)) prs.set(key, c);
     }
   }
-  return reverts;
+  return { shas, prs };
 }
 
-function revertOf(reverts, sha) {
-  for (const [target, commit] of reverts) if (sha.startsWith(target)) return commit;
-  return null;
+function revertOf(reverts, o, { commits, patchId, mergedAt, windowEnd }) {
+  for (const [target, commit] of reverts.shas) if (o.mergeCommit.startsWith(target)) return commit;
+  // Message and content matches must come after the merge: a "Reverts #N" or
+  // an identical undo from before it is about something else.
+  const after = (c) => Date.parse(c.date) >= mergedAt && Date.parse(c.date) <= windowEnd && !o.mergeCommit.startsWith(c.sha);
+  const repo = (o.url?.match(/^https:\/\/[^/]+\/([^/]+\/[^/]+)\/pull\//)?.[1] ?? '').toLowerCase();
+  for (const key of [`${repo}#${o.pr}`, `#${o.pr}`]) {
+    const commit = reverts.prs.get(key);
+    if (commit && after(commit)) return commit;
+  }
+  if (!patchId) return null;
+  const undo = patchId(o.mergeCommit, true);
+  if (!undo) return null;
+  return commits.filter(after).reverse().find((c) => patchId(c.sha, false) === undo) ?? null;
 }
 
 /**
  * Settle the ledger (PROTOTYPE.md flow 3, learning half). Returns the new ledger
- * and the outcomes that were newly reverted. Pure apart from `prState`.
+ * and the outcomes that were newly reverted. Pure apart from `prState` and `patchId`.
  *   open     → pending once the PR is merged, closed if it was closed unmerged
  *   pending  → reverted if a revert of its merge commit landed inside the window
  *   pending  → clean once the window has passed with no revert
  */
-export function settle(ledger, { commits, prState, now, windowDays }) {
+export function settle(ledger, { commits, prState, now, windowDays, patchId = null }) {
   const reverts = findReverts(commits);
+  const ids = new Map();
+  const cachedPatchId = patchId && ((sha, reverse) => {
+    const key = `${sha}:${reverse}`;
+    if (!ids.has(key)) ids.set(key, patchId(sha, reverse));
+    return ids.get(key);
+  });
   const newlyReverted = [];
   const outcomes = ledger.outcomes.map((o) => {
     let next = o;
@@ -45,7 +74,8 @@ export function settle(ledger, { commits, prState, now, windowDays }) {
     }
     if (next.status === 'pending') {
       const mergedAt = Date.parse(next.mergedAt);
-      const revert = next.mergeCommit ? revertOf(reverts, next.mergeCommit) : null;
+      const windowEnd = mergedAt + windowDays * DAY;
+      const revert = next.mergeCommit ? revertOf(reverts, next, { commits, patchId: cachedPatchId, mergedAt, windowEnd }) : null;
       if (revert && Date.parse(revert.date) - mergedAt <= windowDays * DAY) {
         next = { ...next, status: 'reverted', revertCommit: revert.sha };
         newlyReverted.push(next);
@@ -78,6 +108,7 @@ export async function runSync(argv, deps = defaultDeps) {
     prState,
     now: deps.now(),
     windowDays: config.trust.revertWindowDays,
+    patchId: (sha, reverse) => deps.git.patchId(root, sha, { reverse }),
   });
 
   const issues = [];

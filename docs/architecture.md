@@ -140,8 +140,10 @@ Every PR whose proof held is logged, even when the verdict is `HUMAN` because th
 | Status | Meaning | Next |
 |---|---|---|
 | `open` | proven, not merged yet | `pending` when the PR merges, `closed` if it closes unmerged |
-| `pending` | merged, inside `revertWindowDays` | `reverted` if a `git revert` of its merge commit lands inside the window, else `clean` once the window passes |
+| `pending` | merged, inside `revertWindowDays` | `reverted` if a revert of its merge commit lands inside the window, else `clean` once the window passes |
 | `clean` / `reverted` / `closed` | settled | — |
+
+A revert is any commit on the synced ref that says `This reverts commit <sha>` of the merge (`git revert`), that has `Reverts owner/repo#N` on a line of its own for this repo's PR (GitHub's revert-PR body, kept when the revert PR is squashed with its description), or whose change is the exact undo of the merge (same `git patch-id --stable`), whatever its message. The last two must land after the merge. A partial revert, or one squashed together with other changes, matches none of them and is still missed. A false match only marks an outcome reverted, which lowers trust, never raises it.
 
 Trust per (kind, agent, model) counts only `clean` and `reverted` outcomes: at least `minOutcomes`, at least `minCleanRate` clean, and no revert in the last `minOutcomes` merges. Agent and model come from `--agent` and `--model`, set by the workflow and never read from the PR.
 

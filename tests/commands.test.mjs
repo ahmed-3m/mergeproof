@@ -484,6 +484,47 @@ test('settle moves outcomes through open → pending → clean or reverted', () 
   assert.deepEqual(newlyReverted.map((o) => o.pr), [4], 'a revert after the window does not count');
 });
 
+test('settle finds a revert by the GitHub revert-PR reference, after the merge and in this repo only', () => {
+  const now = new Date('2026-10-22T00:00:00Z');
+  const iso = (daysAgo) => new Date(now.getTime() - daysAgo * DAY).toISOString();
+  const pending = (pr) => ({ ...base, pr, status: 'pending', mergedAt: iso(5), mergeCommit: String(pr).repeat(40).slice(0, 40) });
+  const ledger = { schema: LEDGER_SCHEMA, outcomes: [pending(4), pending(6), pending(8), pending(9)] };
+  const commits = [
+    { sha: 'r1', date: iso(1), message: 'Revert "fix: mul by 3" (#12)\n\nReverts acme/app#4' },
+    { sha: 'r2', date: iso(1), message: 'Revert "feat: x"\n\nReverts other/repo#6' },
+    { sha: 'r3', date: iso(9), message: 'Revert "old"\n\nReverts #8' },
+    { sha: 'r4', date: iso(1), message: 'chore: tidy\n\nSee the thread on Reverts #9 for why' },
+  ];
+  const { ledger: after } = settle(ledger, { commits, prState: () => assert.fail('nothing open'), now, windowDays: 14 });
+  assert.deepEqual(after.outcomes.map((o) => [o.pr, o.status]), [[4, 'reverted'], [6, 'pending'], [8, 'pending'], [9, 'pending']],
+    'another repo, a commit from before the merge, or a mention mid-line is not a revert');
+  assert.equal(after.outcomes[0].revertCommit, 'r1');
+});
+
+test('sync finds a revert made by hand under any message, by its content', async () => {
+  const repo = createRepo();
+  try {
+    const ledgerPath = join(repo.dir, '.mergeproof', 'ledger.json');
+    const original = readFileSync(join(repo.dir, 'src/math.mjs'), 'utf8');
+    const mergedSha = repo.write({ 'src/math.mjs': `${original}export const sub = (a, b) => a - b;\n` }).commit('feat: sub (#7)');
+    repo.write({ 'README.md': 'unrelated\n' }).commit('docs: readme');
+    repo.write({ 'src/math.mjs': original }).commit('chore: clean up math');
+    writeLedger(ledgerPath, { ...emptyLedger(), outcomes: [{ ...base, pr: 7, status: 'pending', mergedAt: new Date(Date.now() - 60_000).toISOString(), mergeCommit: mergedSha }] });
+    const code = await runSync([], {
+      ...syncDeps,
+      gh: { getPullRequest: () => assert.fail('no open PRs to look up'), createIssue: () => 'url' },
+      cwd: () => repo.dir,
+      print: () => {},
+    });
+    assert.equal(code, 0);
+    const [o] = readLedger(ledgerPath).outcomes;
+    assert.equal(o.status, 'reverted');
+    assert.equal(o.revertCommit, repo.git(['rev-parse', 'HEAD']), 'the undo commit, not the unrelated one');
+  } finally {
+    repo.cleanup();
+  }
+});
+
 test('sync writes the settled ledger and opens a human-triage issue', async () => {
   const repo = createRepo();
   try {

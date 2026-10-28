@@ -132,6 +132,20 @@ export function commitSubjects(repoRoot, base, head) {
 }
 
 /** [{ sha, date, message }] reachable from ref, newest first. */
+// Stable patch id of a commit's change against its first parent, or of its
+// undo with `reverse`; null for a commit with no change (or no parent). A
+// manual revert has the same id as its merge's undo, whatever its message
+// says. Both sides are plain `git diff`s: `diff-tree -R` swaps the a/ b/
+// prefixes, which changes the id.
+export function patchId(repoRoot, sha, { reverse = false } = {}) {
+  if (!/^[0-9a-f]{7,40}$/.test(sha)) return null;
+  const range = reverse ? [sha, `${sha}^`] : [`${sha}^`, sha];
+  const diff = git(repoRoot, ['diff', '--no-color', '--no-ext-diff', ...range, '--'], { allowFail: true }).stdout;
+  if (!diff.includes('\n@@') && !diff.includes('\nBinary files')) return null;
+  const res = runProcess('git', [...SAFE_CONFIG, 'patch-id', '--stable'], { cwd: repoRoot, input: diff });
+  return res.code === 0 ? res.stdout.trim().split(/\s+/)[0] || null : null;
+}
+
 export function log(repoRoot, ref = 'HEAD') {
   const raw = git(repoRoot, ['log', '--format=%H%x1f%cI%x1f%B%x1e', ref]).stdout;
   return raw
