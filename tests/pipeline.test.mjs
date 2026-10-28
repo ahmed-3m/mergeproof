@@ -61,10 +61,27 @@ test('each tamper rule fires on its own violation', () => {
     [{ files: [...base, { path: 'src/big.js', status: 'A', added: 400, deleted: 0 }] }, 'diffTooLarge'],
     [{ files: [...base, { path: '.mergeproof.json', status: 'M', added: 1, deleted: 1 }] }, 'gateFilesEdited'],
     [{ files: [...base, { path: '.github/workflows/ci.yml', status: 'M', added: 1, deleted: 1 }] }, 'gateFilesEdited'],
+    [{ files: [...base, { path: 'AGENTS.md', status: 'M', added: 1, deleted: 0 }] }, 'agentInstructionsEdited'],
+    [{ files: [...base, { path: 'packages/api/CLAUDE.md', status: 'A', added: 3, deleted: 0 }] }, 'agentInstructionsEdited'],
+    [{ files: [...base, { path: '.cursor/rules/style.mdc', status: 'A', added: 3, deleted: 0 }] }, 'agentInstructionsEdited'],
+    [{ files: [...base, { path: 'docs/agents.md', oldPath: 'AGENTS.md', status: 'R', added: 0, deleted: 0 }] }, 'agentInstructionsEdited'],
+    [{ files: [...base, { path: 'CLAUDE.md', status: 'D', added: 0, deleted: 9 }] }, 'agentInstructionsEdited'],
+    [{ files: [...base, { path: 'pkg/Claude.md', status: 'A', added: 1, deleted: 0 }] }, 'agentInstructionsEdited'],
+    [{ files: [...base, { path: '.Cursor/rules/a.mdc', status: 'A', added: 1, deleted: 0 }] }, 'agentInstructionsEdited'],
+    [{ files: [...base, { path: '.kiro/steering/product.md', status: 'A', added: 1, deleted: 0 }] }, 'agentInstructionsEdited'],
     [{ files: [...base, { path: 'src/$(rm -rf).js', status: 'A', added: 1, deleted: 0 }] }, 'unsafePath'],
     [{ files: [...base, { path: '--exec=x.js', status: 'A', added: 1, deleted: 0 }] }, 'unsafePath'],
   ];
   for (const [over, rule] of cases) assert.deepEqual(rules(tamperCtx(over)), [rule], JSON.stringify(over));
+});
+
+test('agent instructions are never docs, while other markdown still is', () => {
+  const docs = (path) => tamperCtx({ kind: 'docs', files: [{ path, status: 'M', added: 1, deleted: 1 }], addedLines: {}, claims: {} });
+  assert.deepEqual(rules(docs('README.md')), []);
+  assert.deepEqual(rules(docs('docs/guide.md')), []);
+  const note = detectTampering(docs('CLAUDE.md'));
+  assert.deepEqual(note.map((n) => n.rule), ['agentInstructionsEdited']);
+  assert.equal(decide({ kind: 'docs', tamperNotes: note }).verdict, 'HUMAN');
 });
 
 test('lockfile lines do not count toward the diff limit', () => {

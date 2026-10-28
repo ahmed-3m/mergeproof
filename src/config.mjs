@@ -20,6 +20,8 @@ export function defaultConfig() {
       testSupport: ['**/fixtures/**', '**/__fixtures__/**', '**/__snapshots__/**', '**/__mocks__/**', '**/helpers/**', '**/*.snap', '**/*.json'],
       docs: ['docs/**', '**/*.md'],
       manifests: ['package.json', 'package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml'],
+      // Instructions coding agents read on every run: an edit steers every later agent PR, so it is never docs.
+      agentInstructions: ['AGENTS.md', 'AGENT.md', 'CLAUDE.md', 'CLAUDE.local.md', 'GEMINI.md', 'CONVENTIONS.md', '.cursorrules', '.windsurfrules', '.clinerules', '.roorules', '**/.clinerules/**', '**/.cursor/**', '**/.windsurf/**', '**/.claude/**', '**/.gemini/**', '**/.codex/**', '**/.agents/**', '**/.roo/**', '**/.junie/**', '**/.kiro/**', '.aider*', '.github/copilot-instructions.md'],
     },
     issueLabels: { bugfix: ['bug'] }, // maintainer labels on the linked issue that mark a bugfix
     limits: { maxDiffLines: 300, testTimeoutSec: 600, ciWaitSec: 600 }, // ciWaitSec: how long the gate waits for pending CI
