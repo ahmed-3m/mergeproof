@@ -44,6 +44,7 @@ const LEDGER_BRANCH = 'mergeproof-ledger';
 // Fixed label colours and descriptions: the workflows match on the names.
 const LABELS = [
   { name: 'agent', color: '1D76DB', description: 'mergeproof: dispatch this issue to the coding agent' },
+  { name: 'agent:urgent', color: 'B60205', description: 'mergeproof: dispatch this issue to the coding agent now' },
   { name: 'needs-human', color: 'D93F0B', description: 'mergeproof: the gate handed this over to a human' },
 ];
 
