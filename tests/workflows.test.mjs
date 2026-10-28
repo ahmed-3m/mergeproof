@@ -367,7 +367,7 @@ test('issue workflow: gates who may start the agent', () => {
   assert.ok(agent, 'issue workflow needs an agent job');
   assert.match(issue, /github\.event\.issue\.user\.type != 'Bot'/, 'Bot authors never start a run');
   assert.match(issue, /vars\.MERGEPROOF_AUTHORS/, 'opened issues need an allowlisted author');
-  assert.match(issue, /github\.event\.action == 'labeled' && \(github\.event\.label\.name == 'agent' \|\| github\.event\.label\.name == 'urgent'\) && github\.event\.sender\.type != 'Bot'/, 'label starts need the agent or urgent label');
+  assert.match(issue, /github\.event\.action == 'labeled' && \(github\.event\.label\.name == 'agent' \|\| github\.event\.label\.name == 'agent:urgent'\) && github\.event\.sender\.type != 'Bot'/, 'label starts need the agent or agent:urgent label');
   assert.match(issue, /collaborators\/\$SENDER\/permission/, 'label starts check the collaborator permission');
   assert.match(issue, /admin \| maintain \| write/, 'only write, maintain or admin may start via label');
 });
@@ -417,13 +417,13 @@ test('issue workflow: the label vouch filter, run by real jq', (t) => {
     assert.equal(res.code, 0, res.stderr);
     return res.stdout.replace(/\r?\n$/, '').split(/\r?\n/); // keep trailing spaces: a missing login is one
   };
-  assert.deepEqual(lines([]), ['stale agent', 'stale urgent'], 'no label: nothing vouches');
-  assert.deepEqual(lines([labeled('urgent', '2026-01-02T00:00:00Z', 'bob')]), ['stale agent', 'ok urgent bob'], 'urgent alone vouches');
-  assert.deepEqual(lines([labeled('agent', '2026-01-02T00:00:00Z', 'bob'), labeled('urgent', '2026-01-03T00:00:00Z', 'carol')]), ['ok agent bob', 'ok urgent carol'], 'each label answers for itself');
-  assert.deepEqual(lines([labeled('urgent', '2026-01-02T00:00:00Z', 'bob'), unlabeled('urgent', '2026-01-03T00:00:00Z')]), ['stale agent', 'stale urgent'], 'a removed label is stale');
-  assert.deepEqual(lines([labeled('agent', '2026-01-02T00:00:00Z', 'bob'), labeled('urgent', '2026-01-04T00:00:00Z', 'bob')], '2026-01-03T00:00:00Z'), ['stale agent', 'ok urgent bob'], 'only the label applied after the last body edit vouches');
-  assert.deepEqual(lines([labeled('urgent', '2026-01-02T00:00:00Z', 'bob'), renamed('2026-01-03T00:00:00Z')]), ['stale agent', 'stale urgent'], 'a rename after the label is stale');
-  assert.deepEqual(lines([labeled('urgent', '2026-01-02T00:00:00Z', null)]), ['stale agent', 'ok urgent '], 'a missing labeler login comes out empty, after the label name');
+  assert.deepEqual(lines([]), ['stale agent', 'stale agent:urgent'], 'no label: nothing vouches');
+  assert.deepEqual(lines([labeled('agent:urgent', '2026-01-02T00:00:00Z', 'bob')]), ['stale agent', 'ok agent:urgent bob'], 'agent:urgent alone vouches');
+  assert.deepEqual(lines([labeled('agent', '2026-01-02T00:00:00Z', 'bob'), labeled('agent:urgent', '2026-01-03T00:00:00Z', 'carol')]), ['ok agent bob', 'ok agent:urgent carol'], 'each label answers for itself');
+  assert.deepEqual(lines([labeled('agent:urgent', '2026-01-02T00:00:00Z', 'bob'), unlabeled('agent:urgent', '2026-01-03T00:00:00Z')]), ['stale agent', 'stale agent:urgent'], 'a removed label is stale');
+  assert.deepEqual(lines([labeled('agent', '2026-01-02T00:00:00Z', 'bob'), labeled('agent:urgent', '2026-01-04T00:00:00Z', 'bob')], '2026-01-03T00:00:00Z'), ['stale agent', 'ok agent:urgent bob'], 'only the label applied after the last body edit vouches');
+  assert.deepEqual(lines([labeled('agent:urgent', '2026-01-02T00:00:00Z', 'bob'), renamed('2026-01-03T00:00:00Z')]), ['stale agent', 'stale agent:urgent'], 'a rename after the label is stale');
+  assert.deepEqual(lines([labeled('agent:urgent', '2026-01-02T00:00:00Z', null)]), ['stale agent', 'ok agent:urgent '], 'a missing labeler login comes out empty, after the label name');
 });
 
 test('issue workflow: daily cap and dispatch marker', () => {
@@ -506,15 +506,15 @@ test('issue workflow: the ctx step builds the agent issue file from trusted text
   assert.match(ctx, /startswith\("```\\nMergeproof — "\)/, 'the retry verdict must have the exact shape apply posts');
   assert.match(ctx, /comment\(s\) by untrusted authors were omitted/, 'the file ends with the omitted count');
   // The label vouch fails closed once the title or body changed after the
-  // last start label (agent or urgent, each on its own), the label is off,
+  // last start label (agent or agent:urgent, each on its own), the label is off,
   // or a non-writer added it.
   assert.match(ctx, /gh api graphql/);
-  assert.match(ctx, /\("agent", "urgent"\) as \$n \| \(\[\$i\.timelineItems\.nodes\[\] \| select\(\.label\.name\? == \$n\)\] \| last\) as \$l/, 'each start label is checked on its own');
+  assert.match(ctx, /\("agent", "agent:urgent"\) as \$n \| \(\[\$i\.timelineItems\.nodes\[\] \| select\(\.label\.name\? == \$n\)\] \| last\) as \$l/, 'each start label is checked on its own');
   assert.match(ctx, /\(\$i\.lastEditedAt \/\/ ""\) >= \$l\.createdAt then "stale \\\(\$n\)"/, 'a body edit at or after the label is stale');
   assert.match(ctx, /\.__typename == "RenamedTitleEvent" and \.createdAt >= \$l\.createdAt\) then "stale \\\(\$n\)"/, 'a rename after the label is stale');
   assert.match(ctx, /\$l\.__typename != "LabeledEvent" then "stale \\\(\$n\)"/, 'a removed label is stale');
   assert.match(ctx, /while read -r v_state v_label vouch_by; do\n\s+if \[ "\$v_state" = 'ok' \] && trusted "\$\{vouch_by:-\}" < \/dev\/null; then/, 'the labeler must be trusted');
-  assert.match(ctx, /was updated after the agent or urgent label was applied/);
+  assert.match(ctx, /was updated after the agent or agent:urgent label was applied/);
   assert.match(ctx, /Latest gate verdict on pull request #\$PR_NUMBER/, 'retries read the verdict from the file');
 });
 
@@ -616,7 +616,7 @@ gh() {
         FAKE_AUTHOR: 'dave',
         FAKE_TITLE: 'Add CSV export',
         FAKE_BODY: 'Export the ledger as CSV.',
-        FAKE_VOUCH: 'ok agent bob\nstale urgent',
+        FAKE_VOUCH: 'ok agent bob\nstale agent:urgent',
         FAKE_COMMENTS_B64: b64(''),
         FAKE_VERDICT: '',
       },
@@ -628,49 +628,49 @@ gh() {
       },
     },
     {
-      name: 'untrusted author, urgent label vouch current: body kept as vouched by urgent',
+      name: 'untrusted author, agent:urgent label vouch current: body kept as vouched by agent:urgent',
       env: {
         AUTHORS: '',
         PR_NUMBER: '',
         FAKE_AUTHOR: 'dave',
         FAKE_TITLE: 'Login fails for everyone',
         FAKE_BODY: 'Every login returns 500 since the last deploy.',
-        FAKE_VOUCH: 'stale agent\nok urgent bob',
+        FAKE_VOUCH: 'stale agent\nok agent:urgent bob',
         FAKE_COMMENTS_B64: b64(''),
         FAKE_VERDICT: '',
       },
       check: (res) => {
         assert.equal(res.code, 0, res.stderr);
-        assert.match(res.stdout, /vouched by the urgent label, unchanged since/);
+        assert.match(res.stdout, /vouched by the agent:urgent label, unchanged since/);
         assert.match(res.stdout, /Every login returns 500/);
       },
     },
     {
-      name: 'untrusted author, agent label from a read-only user but urgent from a writer: urgent vouches',
+      name: 'untrusted author, agent label from a read-only user but agent:urgent from a writer: agent:urgent vouches',
       env: {
         AUTHORS: '',
         PR_NUMBER: '',
         FAKE_AUTHOR: 'dave',
         FAKE_TITLE: 'Login fails for everyone',
         FAKE_BODY: 'Every login returns 500 since the last deploy.',
-        FAKE_VOUCH: 'ok agent mallory\nok urgent bob',
+        FAKE_VOUCH: 'ok agent mallory\nok agent:urgent bob',
         FAKE_COMMENTS_B64: b64(''),
         FAKE_VERDICT: '',
       },
       check: (res) => {
         assert.equal(res.code, 0, res.stderr);
-        assert.match(res.stdout, /vouched by the urgent label, unchanged since/);
+        assert.match(res.stdout, /vouched by the agent:urgent label, unchanged since/);
       },
     },
     {
-      name: 'untrusted author, urgent labeler login missing: fail closed',
+      name: 'untrusted author, agent:urgent labeler login missing: fail closed',
       env: {
         AUTHORS: '',
         PR_NUMBER: '',
         FAKE_AUTHOR: 'dave',
         FAKE_TITLE: 'Login fails for everyone',
         FAKE_BODY: 'Every login returns 500 since the last deploy.',
-        FAKE_VOUCH: 'stale agent\nok urgent ',
+        FAKE_VOUCH: 'stale agent\nok agent:urgent ',
         FAKE_COMMENTS_B64: b64(''),
         FAKE_VERDICT: '',
       },
@@ -688,7 +688,7 @@ gh() {
         FAKE_AUTHOR: 'dave',
         FAKE_TITLE: 'Add CSV export',
         FAKE_BODY: 'Export the ledger as CSV.',
-        FAKE_VOUCH: 'stale agent\nstale urgent',
+        FAKE_VOUCH: 'stale agent\nstale agent:urgent',
         FAKE_COMMENTS_B64: b64(''),
         FAKE_VERDICT: '',
       },
@@ -706,7 +706,7 @@ gh() {
         FAKE_AUTHOR: 'dave',
         FAKE_TITLE: 'Add CSV export',
         FAKE_BODY: 'Export the ledger as CSV.',
-        FAKE_VOUCH: 'ok agent mallory\nstale urgent',
+        FAKE_VOUCH: 'ok agent mallory\nstale agent:urgent',
         FAKE_COMMENTS_B64: b64(''),
         FAKE_VERDICT: '',
       },
@@ -788,7 +788,7 @@ test('issue workflow: MERGEPROOF_HARNESS picks exactly one agent step, and agy n
   // group, so they never displace a real queued run.
   const issueText = TEMPLATES['mergeproof-issue.yml'].replace(/\r\n/g, '\n');
   const top = issueText.slice(0, issueText.indexOf('\njobs:\n'));
-  assert.match(top, /^concurrency:\n {2}group: \$\{\{ \(github\.event_name == 'workflow_dispatch' \|\| github\.event\.action == 'opened' \|\| github\.event\.label\.name == 'agent' \|\| github\.event\.label\.name == 'urgent'\) && format\('mergeproof-issue-\{0\}', github\.event\.issue\.number \|\| github\.event\.inputs\.issue\) \|\| format\('mergeproof-issue-noop-\{0\}', github\.run_id\) \}\}\n {2}cancel-in-progress: false$/m);
+  assert.match(top, /^concurrency:\n {2}group: \$\{\{ \(github\.event_name == 'workflow_dispatch' \|\| github\.event\.action == 'opened' \|\| github\.event\.label\.name == 'agent' \|\| github\.event\.label\.name == 'agent:urgent'\) && format\('mergeproof-issue-\{0\}', github\.event\.issue\.number \|\| github\.event\.inputs\.issue\) \|\| format\('mergeproof-issue-noop-\{0\}', github\.run_id\) \}\}\n {2}cancel-in-progress: false$/m);
   for (const name of ['agent', 'agy-run', 'agy-publish']) {
     assert.ok(!/^ {4}concurrency:/m.test(ISSUE_JOBS[name]), `${name} has no job-level group of its own`);
   }

@@ -355,7 +355,7 @@ test('remote setup sets labels, variables and secrets, and only those', async ()
     const gh = fakeGh();
     const out = [];
     assert.equal(await runInit(['--yes', '--model', 'glm-4.7', '--bot-login', 'some-bot'], depsFor(repo, gh, out, { env: { MERGEPROOF_MODEL_KEY: MODEL_KEY, MERGEPROOF_BOT_TOKEN: BOT_TOKEN } })), 0, out.join('\n'));
-    assert.deepEqual(gh.calls.label.map((l) => l.name), ['agent', 'urgent', 'needs-human']);
+    assert.deepEqual(gh.calls.label.map((l) => l.name), ['agent', 'agent:urgent', 'needs-human']);
     for (const call of gh.calls.label) {
       assert.equal(call.repo, 'acme/app');
       assert.match(call.color, /^[0-9A-F]{6}$/i);
