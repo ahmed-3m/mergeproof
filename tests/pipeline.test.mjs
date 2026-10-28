@@ -144,6 +144,11 @@ test('support files under a test glob are never proven as new tests', () => {
   assert.deepEqual([...ran], ['tests/a.test.js']);
   const helperOnly = proveChange('feature', proveCtx({ files: [files[0], files[2]] }));
   assert.deepEqual([helperOnly.weak, helperOnly.notes[0].text], [true, 'no new test file to prove the change']);
+  const helperTest = proveChange('feature', proveCtx({
+    files: [files[0], { path: 'tests/helpers/date.test.js', status: 'A' }],
+    base: { 'tests/helpers/date.test.js': ['fail'] },
+  }));
+  assert.equal(helperTest.ok, true, 'a file named like a test is one, even under helpers/');
 });
 
 test('CI still pending is blocked, not weak: the agent cannot fix a slow workflow', () => {

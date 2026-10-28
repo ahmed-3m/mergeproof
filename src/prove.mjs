@@ -11,8 +11,9 @@ import { matchesAny } from './glob.mjs';
 // Every kind also needs CI green. Without a CI result (local preflight, or a repo
 // with no checks) the full suite runs on head instead, with proof.headReruns
 // reruns before a failure counts. CI still pending (after the caller's wait) is
-// blocked, not weak: the agent cannot fix a slow workflow, so it is HUMAN. A refactor always runs the head suite, even
-// with CI: flow 2 needs green on base and head, and the case count is compared.
+// blocked, not weak: the agent cannot fix a slow workflow, so it is HUMAN. A
+// refactor always runs the head suite, even with CI: flow 2 needs green on
+// base and head, and the case count is compared.
 //
 // ctx: {
 //   files: [{ path, status }], config,
@@ -58,12 +59,17 @@ function ciNote(ctx, head = null) {
 // A new helper, fixture or snapshot under a test glob is not a test of its
 // own: run alone it "passes" on base, which would make the proof weak.
 // paths.testSupport names them; they still count as test paths for the kind.
+// A file named like a test is always one, even in a support directory
+// (tests/helpers/date.test.js tests src/helpers/date.js).
+const TEST_NAMES = ['**/*.test.*', '**/*.spec.*'];
+const isSupport = (p, config) => !matchesAny(p, TEST_NAMES) && matchesAny(p, config.paths.testSupport);
+
 function proveNewTests(ctx) {
   const { baseFailRuns, headPassRuns } = ctx.config.proof;
   const newTests = ctx.files
     .filter((f) => f.status === 'A' && matchesAny(f.path, ctx.config.paths.tests))
     .map((f) => f.path)
-    .filter((p) => !matchesAny(p, ctx.config.quarantine) && !matchesAny(p, ctx.config.paths.testSupport));
+    .filter((p) => !matchesAny(p, ctx.config.quarantine) && !isSupport(p, ctx.config));
   if (newTests.length === 0) return [fail('no new test file to prove the change')];
 
   const baseFails = Object.fromEntries(newTests.map((t) => [t, 0]));

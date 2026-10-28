@@ -117,7 +117,7 @@ v1 reads plain JSON, so the gate needs no parser of its own. YAML may come later
 - `testCommand` runs the full suite; `testFileCommand` runs one test file, which is appended as its last argument (`npx jest`, `npx vitest run`, `pytest` also work). Both are split on whitespace with no shell quoting.
 - Globs: `**` spans directories, `*` and `?` stay inside one segment, and a pattern with no `/` matches the file name at any depth.
 - `quarantine`: test files left out of per-file proof runs because they are known to be flaky.
-- `paths.testSupport`: files under a `paths.tests` glob that are not tests themselves (helpers, fixtures, snapshots). They still make a change a feature or bugfix, but are never run as a new test that must fail on base.
+- `paths.testSupport`: files under a `paths.tests` glob that are not tests themselves (helpers, fixtures, snapshots). They still make a change a feature or bugfix, but are never run as a new test that must fail on base. A file named like a test (`*.test.*`, `*.spec.*`) is always a test, even in such a directory.
 - `limits.ciWaitSec`: how long `check` and `apply` wait for CI that is still pending (other workflows), re-reading it every 30 seconds; `0` turns the wait off. CI still pending after the wait is HUMAN, never RETRY.
 
 ## Ledger (`mergeproof-ledger@1`, default `.mergeproof/ledger.json`)
