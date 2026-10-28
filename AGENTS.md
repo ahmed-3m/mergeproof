@@ -41,3 +41,7 @@
 - Update `CHANGELOG.md` under `[Unreleased]` in the same change.
 - When a stub is implemented, add tests for it and keep its exported names (the structure suite enforces them).
 - Version lives in two places: `package.json` and `src/version.mjs` (test-enforced).
+
+## This repo gates itself
+
+`.mergeproof.json` and `.github/workflows/mergeproof-pr.yml` run mergeproof on this repo's own PRs, in `shadow` mode (it reports the verdict, never merges). A PR is gated when its author is in `agents.logins` and its branch starts with `agent/`, so an agent working here opens its PRs from an `agent/...` branch. The gate runs the action pinned to a commit on main, never the PR's code.
