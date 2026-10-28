@@ -101,11 +101,12 @@ v1 reads plain JSON, so the gate needs no parser of its own. YAML may come later
   "testFileCommand": "node --test",
   "paths": {
     "tests": ["test/**", "tests/**", "**/*.test.*", "**/*.spec.*"],
+    "testSupport": ["**/fixtures/**", "**/__fixtures__/**", "**/__snapshots__/**", "**/__mocks__/**", "**/helpers/**", "**/*.snap", "**/*.json"],
     "docs": ["docs/**", "**/*.md"],
     "manifests": ["package.json", "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml"]
   },
   "issueLabels": { "bugfix": ["bug"] },
-  "limits": { "maxDiffLines": 300, "testTimeoutSec": 600 },
+  "limits": { "maxDiffLines": 300, "testTimeoutSec": 600, "ciWaitSec": 600 },
   "proof": { "baseFailRuns": 2, "headPassRuns": 3, "headReruns": 1 },
   "trust": { "minOutcomes": 10, "minCleanRate": 0.9, "revertWindowDays": 14 },
   "agents": { "logins": [], "branchPrefixes": ["agent/"] },
@@ -116,6 +117,8 @@ v1 reads plain JSON, so the gate needs no parser of its own. YAML may come later
 - `testCommand` runs the full suite; `testFileCommand` runs one test file, which is appended as its last argument (`npx jest`, `npx vitest run`, `pytest` also work). Both are split on whitespace with no shell quoting.
 - Globs: `**` spans directories, `*` and `?` stay inside one segment, and a pattern with no `/` matches the file name at any depth.
 - `quarantine`: test files left out of per-file proof runs because they are known to be flaky.
+- `paths.testSupport`: files under a `paths.tests` glob that are not tests themselves (helpers, fixtures, snapshots). They still make a change a feature or bugfix, but are never run as a new test that must fail on base.
+- `limits.ciWaitSec`: how long `check` and `apply` wait for CI that is still pending (other workflows), re-reading it every 30 seconds; `0` turns the wait off. CI still pending after the wait is HUMAN, never RETRY.
 
 ## Ledger (`mergeproof-ledger@1`, default `.mergeproof/ledger.json`)
 

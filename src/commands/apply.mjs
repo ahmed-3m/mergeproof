@@ -12,7 +12,7 @@ import { land } from '../land.mjs';
 import * as git from '../adapters/git.mjs';
 import * as gh from '../adapters/gh.mjs';
 
-export const defaultDeps = { git, gh, now: () => new Date(), cwd: () => process.cwd(), print: (s) => console.log(s) };
+export const defaultDeps = { git, gh, now: () => new Date(), sleep: (ms) => new Promise((r) => setTimeout(r, ms)), cwd: () => process.cwd(), print: (s) => console.log(s) };
 
 // A HUMAN verdict lands as a label so a human finds the PR; RETRY lands
 // nothing extra, the workflow counts retries itself.
@@ -143,6 +143,7 @@ export async function runApply(argv, deps = defaultDeps) {
   if (verdict.proven && verdict.verdict === 'RETRY') return suspect('verdict file disagrees with the re-check (RETRY with proven true)');
 
   let proof;
+  let ciUnfinished = false;
   if (!verdict.proven) {
     proof =
       verdict.verdict === 'RETRY'
@@ -150,10 +151,17 @@ export async function runApply(argv, deps = defaultDeps) {
         : { ok: false, weak: false, notes: [{ ok: false, text: 'proof did not hold when the gate ran' }] };
   } else {
     // The proof held; CI is the one part of it apply can re-check, so a MERGE
-    // whose CI is no longer green is landed as RETRY, like check would.
-    const ci = deps.gh.getChecksStatus(prUrl);
+    // whose CI went red is landed as RETRY, like check would. CI still pending
+    // after the wait is not the agent's to fix: HUMAN.
+    let ci = deps.gh.getChecksStatus(prUrl, verdict.headSha);
+    if (ci === 'pending') {
+      ci = await gh.waitForChecks(prUrl, verdict.headSha, { timeoutSec: config.limits.ciWaitSec, sleep: deps.sleep, read: deps.gh.getChecksStatus });
+    }
     if (ci === 'red') proof = { ok: false, weak: true, notes: [{ ok: false, text: 'CI is red' }] };
-    else if (ci === 'pending') proof = { ok: false, weak: true, notes: [{ ok: false, text: 'CI has not finished' }] };
+    else if (ci === 'pending' || ci === 'moved') {
+      ciUnfinished = true;
+      proof = { ok: false, weak: false, notes: [{ ok: false, text: 'CI has not finished' }] };
+    }
     else proof = { ok: true, weak: false, notes: [] };
   }
 
@@ -162,11 +170,12 @@ export async function runApply(argv, deps = defaultDeps) {
   const trust = kind ? trustFor(ledger, { kind, agent, model }, config.trust) : null;
   const rederived = decide({ kind, tamperNotes, proof, trust });
 
-  // apply may only lower a verdict (MERGE → RETRY on a CI that went red),
-  // never raise one: any other disagreement means the file was tampered with.
-  // A gate HUMAN that re-checks as MERGE (trust grew between the jobs) lands
-  // the lower verdict; that is not tampering.
-  const lowered = verdict.verdict === 'MERGE' && rederived.verdict === 'RETRY';
+  // apply may only lower a verdict (MERGE → RETRY on a CI that went red,
+  // MERGE → HUMAN on CI still pending), never raise one: any other
+  // disagreement means the file was tampered with. A gate HUMAN that re-checks
+  // as MERGE (trust grew between the jobs) lands the lower verdict; that is
+  // not tampering.
+  const lowered = verdict.verdict === 'MERGE' && (rederived.verdict === 'RETRY' || (ciUnfinished && rederived.verdict === 'HUMAN'));
   let final = rederived;
   if (verdict.verdict === 'HUMAN' && rederived.verdict === 'MERGE') {
     final = makeVerdict('HUMAN', { kind, notes: [{ ok: false, text: 'the gate said HUMAN; landing the lower verdict' }] });

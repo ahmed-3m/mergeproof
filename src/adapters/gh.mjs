@@ -76,8 +76,30 @@ export function getPullRequest(prUrl) {
   return normalizePr(JSON.parse(gh(['pr', 'view', prUrl, '--json', PR_FIELDS])));
 }
 
-export function getChecksStatus(prUrl) {
-  return checksState(JSON.parse(gh(['pr', 'view', prUrl, '--json', 'statusCheckRollup'])).statusCheckRollup ?? []);
+/** CI state of the PR's head; 'moved' once the head is no longer `headSha` (when given). */
+export function getChecksStatus(prUrl, headSha = null) {
+  const raw = JSON.parse(gh(['pr', 'view', prUrl, '--json', 'headRefOid,statusCheckRollup']));
+  if (headSha && raw.headRefOid !== headSha) return 'moved';
+  return checksState(raw.statusCheckRollup ?? []);
+}
+
+/**
+ * Re-read pending CI every pollSec seconds, for at most timeoutSec. Other
+ * workflows can still be running when the gate starts, and pending CI is not
+ * something the agent can fix, so waiting beats an early verdict. Returns the
+ * last state; a head that moved stays 'pending' (its CI never finished for
+ * the commit being gated).
+ */
+export async function waitForChecks(prUrl, headSha, { timeoutSec, sleep, read = getChecksStatus, pollSec = 30 }) {
+  let state = 'pending';
+  for (let waited = 0; state === 'pending' && waited < timeoutSec; ) {
+    const step = Math.min(pollSec, timeoutSec - waited);
+    await sleep(step * 1000);
+    waited += step;
+    state = read(prUrl, headSha);
+    if (state === 'moved') return 'pending';
+  }
+  return state;
 }
 
 /**

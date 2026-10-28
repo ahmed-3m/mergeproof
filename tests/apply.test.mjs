@@ -395,6 +395,32 @@ test('a MERGE whose CI is now red lands as RETRY, not merged', async () => {
   }
 });
 
+test('apply waits for pending CI; a MERGE whose CI never finishes lands as HUMAN, not RETRY', async () => {
+  const { repo, baseSha, headSha, ledger } = setup({ mode: 'enforce' });
+  try {
+    const file = join(repo.dir, 'verdict.json');
+    assert.equal(await runCheck([URL, ...PR_ARGS, '--verdict-out', file], deps(repo, fakeGh(gateOpts(baseSha, headSha)), [])), 0);
+    const noWait = async () => {};
+    const stuck = fakeGh(gateOpts(baseSha, headSha));
+    stuck.getChecksStatus = () => 'pending';
+    const out = [];
+    assert.equal(await runApply([file, '--pr', URL, ...PR_ARGS], { ...deps(repo, stuck, out), sleep: noWait }), 4, out.join('\n'));
+    assert.match(out[0], /HUMAN \(kind: bugfix\)[\s\S]*CI has not finished/);
+    assert.equal(stuck.calls.merge.length, 0);
+    assert.deepEqual(stuck.calls.label, ['needs-human']);
+    assert.equal(readLedger(ledger).outcomes.length, 20, 'an unfinished CI is not logged');
+
+    const gh = fakeGh(gateOpts(baseSha, headSha));
+    const states = ['pending', 'green'];
+    gh.getChecksStatus = () => states.shift();
+    out.length = 0;
+    assert.equal(await runApply([file, '--pr', URL, ...PR_ARGS], { ...deps(repo, gh, out), sleep: noWait }), 0, out.join('\n'));
+    assert.deepEqual([states.length, gh.calls.merge.length], [0, 1], 'CI that finishes green during the wait merges');
+  } finally {
+    repo.cleanup();
+  }
+});
+
 test('an inconsistent proof block (proven false, verdict MERGE) is refused', async () => {
   const { repo, baseSha, headSha, ledger } = setup({ mode: 'enforce' });
   try {

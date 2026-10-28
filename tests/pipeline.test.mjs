@@ -130,6 +130,39 @@ test('feature proof is weak when the new test proves nothing or flakes', () => {
   }
 });
 
+test('support files under a test glob are never proven as new tests', () => {
+  const files = [
+    { path: 'src/a.js', status: 'M' },
+    { path: 'tests/a.test.js', status: 'A' },
+    { path: 'tests/helpers/setup.js', status: 'A' },
+    { path: 'tests/fixtures/data.json', status: 'A' },
+  ];
+  const base = runner({ 'tests/a.test.js': ['fail'] }); // a helper run alone "passes" on base
+  const ran = new Set();
+  const p = proveChange('feature', { ...proveCtx({ files }), runBase: (only) => (only.forEach((f) => ran.add(f)), base(only)) });
+  assert.equal(p.ok, true, p.notes.map((n) => n.text).join('; '));
+  assert.deepEqual([...ran], ['tests/a.test.js']);
+  const helperOnly = proveChange('feature', proveCtx({ files: [files[0], files[2]] }));
+  assert.deepEqual([helperOnly.weak, helperOnly.notes[0].text], [true, 'no new test file to prove the change']);
+});
+
+test('CI still pending is blocked, not weak: the agent cannot fix a slow workflow', () => {
+  const files = [{ path: 'src/a.js', status: 'M' }];
+  const proofs = [
+    proveChange('feature', proveCtx({ base: { 'tests/a.test.js': ['fail'] }, ci: 'pending' })),
+    proveChange('refactor', proveCtx({ files, ci: 'pending' })),
+    proveChange('docs', { files: [{ path: 'README.md', status: 'M' }], config: cfg, ci: 'pending', runBase: runner({}), runHead: runner({}) }),
+  ];
+  for (const p of proofs) {
+    assert.deepEqual([p.ok, p.weak], [false, false]);
+    assert.ok(p.notes.some((n) => !n.ok && n.text === 'CI has not finished'));
+  }
+  const redHead = proveChange('refactor', proveCtx({ files, ci: 'pending', head: { '(suite)': ['fail'] } }));
+  assert.equal(redHead.weak, true, 'a failing head suite is still the agent’s to fix');
+  const badTest = proveChange('feature', proveCtx({ ci: 'pending' }));
+  assert.equal(badTest.weak, true, 'so is a new test that passes on base');
+});
+
 test('without CI the full suite runs on head, with one rerun', () => {
   const files = [{ path: 'src/a.js', status: 'M' }];
   assert.equal(proveChange('refactor', proveCtx({ files, ci: null, head: { '(suite)': ['fail', 'pass'] } })).ok, true);

@@ -16,11 +16,13 @@ export function defaultConfig() {
     testFileCommand: 'node --test', // runs one test file, appended as the last argument
     paths: {
       tests: ['test/**', 'tests/**', '**/*.test.*', '**/*.spec.*'],
+      // Files under a tests glob that are not tests themselves: never proven on their own.
+      testSupport: ['**/fixtures/**', '**/__fixtures__/**', '**/__snapshots__/**', '**/__mocks__/**', '**/helpers/**', '**/*.snap', '**/*.json'],
       docs: ['docs/**', '**/*.md'],
       manifests: ['package.json', 'package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml'],
     },
     issueLabels: { bugfix: ['bug'] }, // maintainer labels on the linked issue that mark a bugfix
-    limits: { maxDiffLines: 300, testTimeoutSec: 600 },
+    limits: { maxDiffLines: 300, testTimeoutSec: 600, ciWaitSec: 600 }, // ciWaitSec: how long the gate waits for pending CI
     proof: { baseFailRuns: 2, headPassRuns: 3, headReruns: 1 },
     trust: { minOutcomes: 10, minCleanRate: 0.9, revertWindowDays: 14 },
     agents: { logins: [], branchPrefixes: ['agent/'], identities: {} },
@@ -32,6 +34,7 @@ export function defaultConfig() {
 const RANGES = {
   'limits.maxDiffLines': [1, Infinity, true],
   'limits.testTimeoutSec': [1, 86400, true],
+  'limits.ciWaitSec': [0, 3600, true],
   'proof.baseFailRuns': [1, 10, true],
   'proof.headPassRuns': [1, 10, true],
   'proof.headReruns': [0, 5, true],
