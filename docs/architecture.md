@@ -19,7 +19,7 @@ config from base ─► classifyKind ─► detectTampering ─► proveChange �
 - `check --local` runs the same pipeline on `HEAD` against its merge base with `--base` (default: origin's default branch). It never merges, comments or writes the ledger. Agents use it as a preflight (M2).
 - `mergeproof sync` settles the ledger (below) and opens a human-triage issue for every newly reverted merge.
 
-All I/O goes through `src/adapters/`: `process` for child processes, `git` for local history and worktrees, `gh` for GitHub, `runner` for tests. `classify`, `tamper`, `prove`, `decide`, `ledger` and `trailer` are pure, and `evaluate()` in `src/commands/check.mjs` takes its adapters as arguments, so everything is testable without GitHub.
+All I/O goes through `src/adapters/`: `process` for child processes, `git` for local history and worktrees, `gh` for GitHub, `runner` for tests, `sandbox` for running them as an unprivileged OS user (`check --test-user`). `classify`, `tamper`, `prove`, `decide`, `ledger` and `trailer` are pure, and `evaluate()` in `src/commands/check.mjs` takes its adapters as arguments, so everything is testable without GitHub.
 
 ## Workflows: gate job and apply job
 

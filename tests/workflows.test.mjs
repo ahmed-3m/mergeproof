@@ -246,6 +246,8 @@ test('pr workflow: the gate job is read-only and writes the verdict file', () =>
   assert.match(gate, /command: check/);
   assert.match(gate, /--head \$\{\{ needs\.context\.outputs\.head-sha \}\}/, 'the gate pins the head whose CI completed');
   assert.match(gate, /--verdict-out/);
+  assert.match(gate, /sudo useradd --system [^\n]*mergeproof-tests/, 'the gate job creates the unprivileged test user');
+  assert.match(gate, /--test-user mergeproof-tests/, "the PR's tests run as that user, not as the gate");
   assert.match(gate, /\{\{INSTALL_COMMAND\}\}/, 'the gate job installs the repo dependencies for the proof');
   assert.match(gate, /upload-artifact/, 'the verdict file is uploaded for the apply job');
 });

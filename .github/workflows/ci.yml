@@ -25,6 +25,13 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node }}
+      - name: Create the sandbox test user (check --test-user)
+        # Lets the --test-user test run for real: PR tests as another OS user.
+        if: runner.os == 'Linux'
+        run: |
+          sudo useradd --system --no-create-home --shell /usr/sbin/nologin mergeproof-tests
+          echo "MERGEPROOF_TEST_USER=mergeproof-tests" >> "$GITHUB_ENV"
+          ls -ld "$HOME" "$GITHUB_WORKSPACE" /tmp
       - name: Tests
         run: npm test
 
