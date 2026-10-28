@@ -38,21 +38,23 @@ function importedInstructions(root, baseSha, config, deps) {
     }
     return targets.get(link.path);
   };
+  const imports = {};
   // `p` with its first symlinked component (the whole path included) swapped
   // for the link's target; `p` itself when no component is a link, null when
-  // the link points outside the repo.
-  const unlink = (p) => {
+  // the link points outside the repo. The link is recorded too, so retargeting
+  // or deleting it is tamper like editing the file it points at.
+  const unlink = (p, via) => {
     const parts = p.split('/');
     for (let n = 1; n <= parts.length; n++) {
       const entry = real.get(parts.slice(0, n).join('/').toLowerCase());
       if (entry?.symlink) {
+        if (!isInstruction(entry.path)) imports[entry.path.toLowerCase()] = via;
         const t = linkTarget(entry);
         return t ? [t, ...parts.slice(n)].join('/') : null;
       }
     }
     return p;
   };
-  const imports = {};
   const seen = new Set();
   // Record `p` (instruction files are protected by their glob already), then
   // the path its symlinks resolve to, the files under it if it is a
@@ -64,7 +66,7 @@ function importedInstructions(root, baseSha, config, deps) {
     seen.add(key);
     if (!isInstruction(p)) imports[key] = from;
     const via = isInstruction(p) ? p : from;
-    const resolved = unlink(p);
+    const resolved = unlink(p, via);
     if (resolved !== p) {
       if (resolved) visit(resolved, via, next);
       return;
