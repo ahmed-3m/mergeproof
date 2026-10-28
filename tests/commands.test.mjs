@@ -347,7 +347,7 @@ test('--test-user: node_modules is mirrored with hard links, readable, links kep
   mkdirSync(join(src, 'node_modules/.bin'));
   writeFileSync(join(src, 'node_modules/pkg/bin/run.js'), 'run');
   symlinkSync('../pkg/bin/run.js', join(src, 'node_modules/.bin/run'));
-  symlinkSync('../../outside', join(src, 'node_modules/escape'));
+  symlinkSync('../outside', join(src, 'node_modules/escape'));
   const shared = sandbox.shareModules(join(src, 'node_modules'));
   try {
     assert.equal(readFileSync(join(shared, '.bin/run'), 'utf8'), 'run', 'a relative .bin link still resolves');
