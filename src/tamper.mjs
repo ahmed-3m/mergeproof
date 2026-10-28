@@ -1,3 +1,4 @@
+import { posix } from 'node:path';
 import { CONFIG_FILE } from './config.mjs';
 import { matchesAny } from './glob.mjs';
 
@@ -7,6 +8,7 @@ import { matchesAny } from './glob.mjs';
 //   addedLines: { [testPath]: string[] },     lines added to test files
 //   claims: { title?, labels?: string[], subjects?: string[] },  agent-written, never trusted
 //   config,
+//   instructionImports?: { [lowercasePath]: importer },  files the base's agent instructions pull in
 // }
 // Each rule is a function (ctx) => text | null so rules stay pluggable
 // (brief RISK: agents adapt to known rules). A dropped test-case count is not
@@ -58,6 +60,24 @@ function first(items, describe) {
 
 const isTest = (ctx, p) => p != null && matchesAny(p, ctx.config.paths.tests);
 
+// Paths an instruction file imports with `@path` (CLAUDE.md, GEMINI.md), resolved
+// against its directory. Loose on purpose: an npm scope or a decorator that is
+// not really an import only protects one more path. `@~/...` and paths that
+// leave the repo are skipped.
+const IMPORT = /(?:^|\s)@([A-Za-z0-9_.][A-Za-z0-9_./-]*)/g;
+
+export function instructionImports(text, fromPath) {
+  const dir = posix.dirname(fromPath);
+  const paths = [];
+  for (const m of text.matchAll(IMPORT)) {
+    const raw = m[1].replace(/[.,;:]+$/, '');
+    if (!raw) continue;
+    const p = posix.normalize(posix.join(dir, raw)).replace(/\/$/, '');
+    if (p !== '.' && p !== '..' && !p.startsWith('../')) paths.push(p);
+  }
+  return paths;
+}
+
 export const TAMPER_RULES = [
   function unsafePath(ctx) {
     const bad = ctx.files.flatMap((f) => [f.path, f.oldPath]).filter((p) => p != null && !SAFE_PATH.test(p));
@@ -71,10 +91,16 @@ export const TAMPER_RULES = [
     // AGENTS.md, CLAUDE.md, .cursor/rules and friends are prompts for every
     // later agent run, so an agent PR may not rewrite them (they would
     // otherwise classify as docs and could auto-merge). Case is ignored:
-    // macOS and Windows load claude.md as CLAUDE.md.
+    // macOS and Windows load claude.md as CLAUDE.md. A file they @import is
+    // loaded as instructions too, so it is protected the same way.
     const globs = ctx.config.paths.agentInstructions.map((g) => g.toLowerCase());
-    const hit = ctx.files.filter((f) => [f.path, f.oldPath].some((p) => p && matchesAny(p.toLowerCase(), globs)));
-    return first(hit, (f) => `edits agent instructions ${f.path}`);
+    const imports = ctx.instructionImports ?? {};
+    const importer = (p) => (Object.hasOwn(imports, p.toLowerCase()) ? imports[p.toLowerCase()] : null);
+    const hit = ctx.files.filter((f) => [f.path, f.oldPath].some((p) => p && (matchesAny(p.toLowerCase(), globs) || importer(p))));
+    return first(hit, (f) => {
+      const via = [f.path, f.oldPath].map((p) => p && !matchesAny(p.toLowerCase(), globs) && importer(p)).find(Boolean);
+      return via ? `edits ${f.path}, which ${via} imports as agent instructions` : `edits agent instructions ${f.path}`;
+    });
   },
   function existingTestEdited(ctx) {
     const hit = ctx.files.filter((f) => (f.status === 'M' || f.status === 'R') && (isTest(ctx, f.path) || isTest(ctx, f.oldPath)));

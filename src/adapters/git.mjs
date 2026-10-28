@@ -131,7 +131,22 @@ export function commitSubjects(repoRoot, base, head) {
   return out(repoRoot, ['log', '--format=%s', `${base}..${head}`]).split('\n').filter(Boolean);
 }
 
-/** [{ sha, date, message }] reachable from ref, newest first. */
+/** Every file path in the tree at `sha`. */
+export function listFiles(repoRoot, sha) {
+  return git(repoRoot, ['ls-tree', '-r', '-z', '--name-only', sha]).stdout.split('\0').filter(Boolean);
+}
+
+/** [{ path, line }] for lines at `sha` matching the extended regex, in text files under `pathspecs`. */
+export function grep(repoRoot, sha, pattern, pathspecs) {
+  const res = git(repoRoot, ['grep', '-I', '-z', '-E', '-e', pattern, sha, '--', ...pathspecs], { allowFail: true });
+  if (res.code !== 0) return []; // 1 is "no match"
+  const prefix = `${sha}:`;
+  return res.stdout.split('\n').filter(Boolean).map((l) => {
+    const at = l.indexOf('\0');
+    return { path: l.slice(0, at).replace(prefix, ''), line: l.slice(at + 1) };
+  });
+}
+
 // Stable patch id of a commit's change against its first parent, or of its
 // undo with `reverse`; null for a commit with no change (or no parent). A
 // manual revert has the same id as its merge's undo, whatever its message
@@ -146,6 +161,7 @@ export function patchId(repoRoot, sha, { reverse = false } = {}) {
   return res.code === 0 ? res.stdout.trim().split(/\s+/)[0] || null : null;
 }
 
+/** [{ sha, date, message }] reachable from ref, newest first. */
 export function log(repoRoot, ref = 'HEAD') {
   const raw = git(repoRoot, ['log', '--format=%H%x1f%cI%x1f%B%x1e', ref]).stdout;
   return raw
