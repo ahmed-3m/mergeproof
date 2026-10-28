@@ -3,7 +3,8 @@ import { matchesAny } from './glob.mjs';
 
 // Proof required per kind (PROTOTYPE.md flow 2):
 //   feature, bugfix  new test files fail on base (baseFailRuns/baseFailRuns, new tests only)
-//                    and pass on head (headPassRuns/headPassRuns)
+//                    and pass on head (headPassRuns/headPassRuns), and the counted
+//                    test cases must not drop (testCountDropped)
 //   refactor         zero test-file changes; full suite green on base and head,
 //                    and the counted test cases must not drop (testCountDropped)
 //   docs             only docs paths changed
@@ -11,9 +12,11 @@ import { matchesAny } from './glob.mjs';
 // Every kind also needs CI green. Without a CI result (local preflight, or a repo
 // with no checks) the full suite runs on head instead, with proof.headReruns
 // reruns before a failure counts. CI still pending (after the caller's wait) is
-// blocked, not weak: the agent cannot fix a slow workflow, so it is HUMAN. A
-// refactor always runs the head suite, even with CI: flow 2 needs green on
-// base and head, and the case count is compared.
+// blocked, not weak: the agent cannot fix a slow workflow, so it is HUMAN.
+// Every kind that runs tests also runs the full suite on base and head, even
+// with CI, to compare case counts: a PR can make cases disappear without
+// touching a test file, e.g. by deleting entries of a list in src/ the tests
+// generate cases from. For a refactor, flow 2 also needs green on base and head.
 //
 // ctx: {
 //   files: [{ path, status }], config,
@@ -29,6 +32,14 @@ import { matchesAny } from './glob.mjs';
 
 const pass = (text) => ({ ok: true, text });
 const fail = (text) => ({ ok: false, text });
+
+// The base tree has the PR's new test files checked out (they fail there), so
+// an honest PR counts the same cases on both sides, whatever its kind.
+// Unknown counts give no note, so any runner works.
+function countDropped(base, head) {
+  if (base.count == null || head.count == null || head.count >= base.count) return [];
+  return [{ ok: false, rule: 'testCountDropped', text: `test count dropped from ${base.count} on base to ${head.count} on head` }];
+}
 
 function result(notes, { blocked = false, tamperNotes = [] } = {}) {
   // Tampering is never weak: a retry would only teach better cheating.
@@ -115,24 +126,19 @@ export function proveChange(kind, ctx) {
       if (base.failed.length > 0) {
         return result([fail('full suite already fails on base, so a refactor cannot be proven')], { blocked: true });
       }
-      // Green on base and head, and head must not run fewer cases: a refactor
-      // can make tests disappear without touching a test file, e.g. by
-      // deleting entries of a list in src/ the tests generate cases from.
       const head = headSuite(ctx);
       const notes = [pass('no test changes; full suite green on base')];
       notes.push(head.green ? ciNote(ctx, head) : fail('full suite fails on head'));
-      const dropped =
-        base.count != null && head.run.count != null && head.run.count < base.count
-          ? [{ ok: false, rule: 'testCountDropped', text: `test count dropped from ${base.count} on base to ${head.run.count} on head` }]
-          : [];
-      // unknown counts: no note, any runner works
-      return result(notes, { blocked: head.green && ctx.ci === 'pending', tamperNotes: dropped });
+      return result(notes, { blocked: head.green && ctx.ci === 'pending', tamperNotes: countDropped(base, head.run) });
     }
     case 'feature':
     case 'bugfix': {
       const proof = proveNewTests(ctx);
       if (proof.some((n) => !n.ok)) return result(proof);
-      return result([...proof, ciNote(ctx)], { blocked: ctx.ci === 'pending' });
+      // The base suite is red here (the new tests fail on it); only its count matters.
+      const base = ctx.runBase(null);
+      const head = headSuite(ctx);
+      return result([...proof, ciNote(ctx, head)], { blocked: ctx.ci === 'pending', tamperNotes: countDropped(base, head.run) });
     }
     default:
       return result([fail('changes fit no single kind (tests only, or nothing)')], { blocked: true });

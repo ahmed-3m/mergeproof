@@ -9,7 +9,12 @@ export const defaultDeps = { gh, now: () => new Date() };
  * Land a verdict on GitHub — the write half both `check` and `apply` share:
  * record the outcome when the proof held, squash-merge (MERGE verdict and
  * enforce mode, pinned to the proven head) with a Mergeproof-Verdict trailer,
- * write the ledger, then comment the verdict.
+ * record the merge, then comment the verdict.
+ *
+ * The open outcome is written before the merge: a crash after merging leaves
+ * an open entry, which sync turns into pending once it sees the PR merged,
+ * never a merged PR the ledger does not know about. Re-recording is safe, as
+ * appendOutcome replaces the PR's open entry.
  *
  * A proven PR is logged even when a human must merge it, so trust can grow
  * from human merges (shadow mode, cold start).
@@ -29,15 +34,15 @@ export function land(input, deps = defaultDeps) {
       skill: skill ?? null, attempts, verdict: verdict.verdict,
       provenAt: deps.now().toISOString(), mergedAt: null, mergeCommit: null, status: 'open',
     };
-    appendOutcome(ledger, outcome); // fail before merging if the outcome can't be logged
+    writeLedger(ledgerPath, appendOutcome(ledger, outcome));
     if (verdict.verdict === 'MERGE' && config.mode === 'enforce') {
       const trailer = formatTrailer({ pr: pr.number, kind, agent, model, skill, attempts });
       deps.gh.squashMerge(prUrl, { body: trailer, headSha });
+      merged = true;
       const after = deps.gh.getPullRequest(prUrl);
       Object.assign(outcome, { status: 'pending', mergedAt: after.mergedAt ?? deps.now().toISOString(), mergeCommit: after.mergeCommit });
-      merged = true;
+      writeLedger(ledgerPath, appendOutcome(ledger, outcome));
     }
-    writeLedger(ledgerPath, appendOutcome(ledger, outcome));
   }
   const text = `${formatVerdict(verdict)}\n  (${mode}${verdict.verdict === 'MERGE' ? (merged ? ': merged' : ': not merged') : ''})`;
   deps.gh.comment(prUrl, `\`\`\`\n${text}\n\`\`\``);

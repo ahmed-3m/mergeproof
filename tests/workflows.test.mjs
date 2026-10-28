@@ -246,6 +246,8 @@ test('pr workflow: the gate job is read-only and writes the verdict file', () =>
   assert.match(gate, /command: check/);
   assert.match(gate, /--head \$\{\{ needs\.context\.outputs\.head-sha \}\}/, 'the gate pins the head whose CI completed');
   assert.match(gate, /--verdict-out/);
+  assert.match(gate, /sudo useradd --system [^\n]*mergeproof-tests/, 'the gate job creates the unprivileged test user');
+  assert.match(gate, /--test-user mergeproof-tests/, "the PR's tests run as that user, not as the gate");
   assert.match(gate, /\{\{INSTALL_COMMAND\}\}/, 'the gate job installs the repo dependencies for the proof');
   assert.match(gate, /upload-artifact/, 'the verdict file is uploaded for the apply job');
 });
@@ -263,6 +265,8 @@ test('pr workflow: the apply job lands the verdict and never installs anything',
   assert.match(apply, /cancel-in-progress: false/);
   assert.match(apply, /gh workflow run mergeproof-issue\.yml/, 'RETRY re-dispatches the agent');
   assert.match(apply, /--add-label needs-human/, 'exhausted retries label the PR needs-human');
+  const push = apply.slice(apply.indexOf('- name: Commit and push the ledger'));
+  assert.match(push.split('\n').slice(0, 4).join('\n'), /if: \$\{\{ !cancelled\(\) && steps\.apply\.outcome != 'skipped' \}\}/, 'the ledger is pushed even when apply failed after merging');
 });
 
 test('pr workflow: concurrent applies both land their outcomes on the ledger', (t) => {

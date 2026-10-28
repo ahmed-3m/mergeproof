@@ -29,7 +29,7 @@
 | `src/classify.mjs` → `tamper.mjs` → `prove.mjs` → `decide.mjs` | The gate pipeline, in order |
 | `src/agents.mjs`, `src/inspect.mjs`, `src/land.mjs`, `src/verdictfile.mjs` | Agent-PR identity, paths → kind + tamper notes (both shared with `apply`), landing a verdict (record, merge, ledger, comment), and the `mergeproof-verdict@1` gate → apply handoff |
 | `src/ledger.mjs`, `src/trailer.mjs` | Trust ledger and `Mergeproof-Verdict` merge trailer |
-| `src/adapters/` | `process` (child processes), `git` (diffs, worktrees), `gh`, test `runner` |
+| `src/adapters/` | `process` (child processes), `git` (diffs, worktrees), `gh`, test `runner`, `sandbox` (`--test-user`: tests as another OS user) |
 | `tests/structure.test.mjs` | Repo invariants and per-module export contracts |
 | `tests/benchmarks.test.mjs`, `tests/fixtures/` | The pre-registered scenarios, run against real git repos |
 | `benchmarks/specs.md` | Pre-registered gate scenarios with expected verdicts |

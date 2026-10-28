@@ -63,6 +63,7 @@ const CONTRACT = {
   'src/adapters/git.mjs': ['changedFiles', 'changedPaths', 'diff', 'addedLines', 'addWorktree', 'removeWorktree', 'addBranchWorktree', 'refExists', 'commonDir', 'log', 'patchId'],
   'src/adapters/gh.mjs': ['getPullRequest', 'getChecksStatus', 'waitForChecks', 'issueLabels', 'squashMerge', 'comment', 'createIssue', 'addLabel', 'repoView', 'createLabel', 'setVariable', 'setSecret', 'apiJson', 'branchExists', 'redactSecret', 'getIssue', 'issueComments', 'collaboratorPermission'],
   'src/adapters/runner.mjs': ['runTests', 'parseTestCount'],
+  'src/adapters/sandbox.mjs': ['TEST_USER', 'check', 'shareModules', 'makeHome', 'claim', 'wrap', 'killAll', 'release'],
 };
 
 for (const [file, names] of Object.entries(CONTRACT)) {
