@@ -104,7 +104,7 @@ The issue workflow can run agy instead of Claude Code: set the `MERGEPROOF_HARNE
 
 This repo's [`action.yml`](action.yml) is the reusable `ahmed-3m/mergeproof@v1` composite action (`check` | `apply` | `sync`), and [`templates/workflows/`](templates/README.md) ships the three workflow templates — issue to agent PR, PR to gate + apply, nightly ledger sync. `mergeproof init` copies them into your repo and fills in `{{CI_WORKFLOW}}` and `{{INSTALL_COMMAND}}` — the placeholders, repo variables and secrets are documented in [`templates/README.md`](templates/README.md), and every job's permissions in [SECURITY.md](SECURITY.md#workflow-permissions).
 
-Mergeproof gates its own agent PRs too, in `shadow` mode: a PR whose author is in `agents.logins` and whose branch starts with `agent/` (never the branch name alone) gets a verdict comment, and nothing merges on its own. The setup is [`.mergeproof.json`](.mergeproof.json) and [`.github/workflows/mergeproof-pr.yml`](.github/workflows/mergeproof-pr.yml), which pins the action to a commit on `main` rather than `@v1`.
+Mergeproof gates its own agent PRs too, in `enforce` mode: a PR whose author is in `agents.logins` and whose branch starts with `agent/` (never the branch name alone) gets a verdict comment, and merges on its own only once its kind has earned trust (see [Cold start & trust](#cold-start--trust)). The setup is [`.mergeproof.json`](.mergeproof.json) and [`.github/workflows/mergeproof-pr.yml`](.github/workflows/mergeproof-pr.yml), which pins the action to a commit on `main` rather than `@v1`.
 
 ## Roadmap
 

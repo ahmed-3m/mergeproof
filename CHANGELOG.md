@@ -12,6 +12,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - Feature and bugfix proofs now compare test-case counts too, not just refactors. They run the full suite on base (with the PR's new test files checked out, so an honest PR counts the same cases on both sides) and on head, and fewer cases on head is the `testCountDropped` tamper rule (`HUMAN`, no retry). Before, a feature PR could add one proving test while deleting the entries of a `src/` list other tests generate their cases from. This adds one full-suite run on each side to feature and bugfix proofs; counts that don't parse are still skipped.
 
 ### Changed
+- The self-gate runs in `enforce` mode: an agent PR on this repo merges on its own once the gate says `MERGE`, which needs the PR's kind to have earned trust (10 settled outcomes, 90% clean, by default). Until then every verdict stays `HUMAN`; deps PRs never auto-merge.
 - README usage now leads with the two-job gate/apply workflow, and the single-process `check <pr-url>` is marked local-only.
 
 ### Added

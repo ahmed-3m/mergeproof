@@ -44,4 +44,4 @@
 
 ## This repo gates itself
 
-`.mergeproof.json` and `.github/workflows/mergeproof-pr.yml` run mergeproof on this repo's own PRs, in `shadow` mode (it reports the verdict, never merges). A PR is gated when its author is in `agents.logins` and its branch starts with `agent/`, so an agent working here opens its PRs from an `agent/...` branch. The gate runs the action pinned to a commit on main, never the PR's code.
+`.mergeproof.json` and `.github/workflows/mergeproof-pr.yml` run mergeproof on this repo's own PRs, in `enforce` mode: it merges an agent PR only when the proof holds and that kind of PR has earned trust for this agent and model (`trust.minOutcomes` settled outcomes, default 10, at least 90% clean, no recent revert). Until then every verdict is HUMAN, and deps PRs never merge on their own. A PR is gated when its author is in `agents.logins` and its branch starts with `agent/`, so an agent working here opens its PRs from an `agent/...` branch. The gate runs the action pinned to a commit on main, never the PR's code.

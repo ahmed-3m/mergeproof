@@ -1,5 +1,5 @@
 {
-  "mode": "shadow",
+  "mode": "enforce",
   "paths": {
     "agentInstructions": [
       "AGENTS.md",
