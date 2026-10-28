@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/gate-LLM--free-58a6ff" alt="the gate never calls an LLM">
 </p>
 
-> Status: v0.1.0 — the M1 gate (`check`, `check --local`, `sync`), the check/apply CI split, and the reusable GitHub Action with workflow templates. Verified against the [pre-registered scenarios](benchmarks/specs.md). `mergeproof init` wires a repo in one command — see [Install](#install).
+> Status: v0.1.2 — the M1 gate (`check`, `check --local`, `sync`), the check/apply CI split, and the reusable GitHub Action with workflow templates. Verified against the [pre-registered scenarios](benchmarks/specs.md). `mergeproof init` wires a repo in one command — see [Install](#install).
 
 Coding agents (Copilot, Codex, OpenHands, Claude Code, GLM through Claude Code) can already turn an issue into a pull request. The hard part is deciding whether that PR is safe to merge without a human. `mergeproof` is a zero-dependency, LLM-free gate that makes that decision:
 
@@ -33,14 +33,16 @@ Usage errors exit `2`, other errors `1`.
 
 ## Usage
 
-A workflow calls the gate on the agent's pull request; agents preflight locally before opening one:
+In CI, the gate is split across two jobs in [`templates/workflows/mergeproof-pr.yml`](templates/workflows/mergeproof-pr.yml), which `mergeproof init` installs. The gate job runs the PR's untrusted tests with read-only permissions and writes `verdict.json`; the apply job never runs PR code, re-derives everything except the proof result, and is the only one with write permissions:
 
 ```bash
-npx @ahmed-3m/mergeproof check https://github.com/you/repo/pull/42 --agent claude-code --model glm-5.2 --issue 17
 npx @ahmed-3m/mergeproof check <pr-url> --head <sha> --verdict-out verdict.json   # read-only gate job; --head pins the commit whose CI completed. A separate write job runs:
 npx @ahmed-3m/mergeproof apply verdict.json --pr <pr-url> --head <sha> --agent <name> --model <name>  # lands the verdict, labels needs-human on HUMAN
 npx @ahmed-3m/mergeproof check --local      # preflight, run by agents before opening a PR
 npx @ahmed-3m/mergeproof sync               # settle the ledger, record reverts
+
+# Local or manual runs only (never in a CI job that holds a write token, because it runs PR test code in the same process):
+npx @ahmed-3m/mergeproof check https://github.com/you/repo/pull/42 --agent claude-code --model glm-5.2 --issue 17
 ```
 
 `--issue <n>` is the issue the agent was dispatched for: a maintainer `bug` label on it makes the PR a bugfix (otherwise a feature). Only PRs by an author listed in `agents.logins` in `.mergeproof.json`, on a branch matching `agents.branchPrefixes`, are gated — anyone can name a branch `agent/...`, and fork PRs always go to a human.

@@ -4,6 +4,9 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Changed
+- README usage now leads with the two-job gate/apply workflow, and the single-process `check <pr-url>` is marked local-only.
+
 ### Added
 - `agents.identities` in `.mergeproof.json` maps an agent login to its own trust bucket, e.g. `"agy-bot": { "agent": "agy", "model": "gemini-4-argon-high" }`. `check` and `apply` use it for PRs by that login instead of the `--agent`/`--model` flags (the flags stay the fallback), so one workflow can gate several agents in separate buckets. Like the rest of the config it is read from the base branch tip; each login must also be in `agents.logins`.
 - `mergeproof dispatch <issue> --harness agy [--model <label>] [--dry-run]` runs the Antigravity CLI (`agy -p`) on an issue from a maintainer's machine. It builds the same trusted issue file as the issue workflow (an untrusted author's title and body need an explicit `--vouch <digest>` naming the exact issue file the maintainer read; comments only from trusted authors), runs agy in a throwaway worktree on a new `agent/issue-<n>` branch with the identity account's token from `MERGEPROOF_DISPATCH_TOKEN` in its environment only, and leaves the PR to the normal gate. It never decides a verdict.
