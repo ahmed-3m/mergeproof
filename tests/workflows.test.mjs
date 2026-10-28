@@ -263,6 +263,8 @@ test('pr workflow: the apply job lands the verdict and never installs anything',
   assert.match(apply, /cancel-in-progress: false/);
   assert.match(apply, /gh workflow run mergeproof-issue\.yml/, 'RETRY re-dispatches the agent');
   assert.match(apply, /--add-label needs-human/, 'exhausted retries label the PR needs-human');
+  const push = apply.slice(apply.indexOf('- name: Commit and push the ledger'));
+  assert.match(push.split('\n').slice(0, 4).join('\n'), /if: \$\{\{ !cancelled\(\) && steps\.apply\.outcome != 'skipped' \}\}/, 'the ledger is pushed even when apply failed after merging');
 });
 
 test('pr workflow: concurrent applies both land their outcomes on the ledger', (t) => {
