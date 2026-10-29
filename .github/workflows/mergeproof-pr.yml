@@ -184,7 +184,7 @@ jobs:
         # HUMAN. 3 and 4 are verdicts, not failures; the step below fails the
         # job only on 1/2 (error / usage).
         continue-on-error: true
-        uses: ahmed-3m/mergeproof@7a74b37044ea23523c86b5ba2d5fdb23b7bfc3ac # main
+        uses: ahmed-3m/mergeproof@9889e3c37c7c95e3312845799fb6de0c55f386e7 # main
         env:
           GH_TOKEN: ${{ github.token }}
         with:
@@ -265,7 +265,7 @@ jobs:
       - name: Land the verdict — mergeproof apply
         id: apply
         continue-on-error: true
-        uses: ahmed-3m/mergeproof@7a74b37044ea23523c86b5ba2d5fdb23b7bfc3ac # main
+        uses: ahmed-3m/mergeproof@9889e3c37c7c95e3312845799fb6de0c55f386e7 # main
         env:
           # github.token, never the agent's bot token: verdict comments must be
           # authored by github-actions[bot] (the attempt count and the agent's
