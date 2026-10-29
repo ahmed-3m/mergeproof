@@ -375,7 +375,7 @@ jobs:
       # still start the agent.
       - name: Run the coding agent on the issue
         if: success() && steps.ctx.outputs.stopped != 'true' && steps.ctx.outputs.harness == 'claude'
-        uses: anthropics/claude-code-action@v1 # pin the commit SHA you audit
+        uses: anthropics/claude-code-action@a26b07d8c778b0c43f64618e5fd29fd0f8af72e8 # v1.0.250
         env:
           # init sets this to the Anthropic-compatible endpoint of the model
           # provider (https://api.z.ai/api/anthropic for GLM).
