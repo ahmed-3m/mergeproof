@@ -1,0 +1,49 @@
+{
+  "mode": "enforce",
+  "paths": {
+    "agentInstructions": [
+      "AGENTS.md",
+      "AGENT.md",
+      "CLAUDE.md",
+      "CLAUDE.local.md",
+      "GEMINI.md",
+      "CONVENTIONS.md",
+      ".cursorrules",
+      ".windsurfrules",
+      ".clinerules",
+      ".roorules",
+      "**/.clinerules/**",
+      "**/.cursor/**",
+      "**/.windsurf/**",
+      "**/.claude/**",
+      "**/.gemini/**",
+      "**/.codex/**",
+      "**/.agents/**",
+      "**/.roo/**",
+      "**/.junie/**",
+      "**/.kiro/**",
+      ".aider*",
+      ".github/copilot-instructions.md",
+      "skills/**"
+    ]
+  },
+  "agents": {
+    "logins": [
+      "ahmed-3m",
+      "mergeproof-bot"
+    ],
+    "branchPrefixes": [
+      "agent/"
+    ],
+    "identities": {
+      "ahmed-3m": {
+        "agent": "claude-code",
+        "model": "claude-opus-5-5"
+      },
+      "mergeproof-bot": {
+        "agent": "gemini-cli",
+        "model": "gemini-3-flash-preview"
+      }
+    }
+  }
+}

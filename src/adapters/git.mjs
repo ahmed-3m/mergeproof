@@ -131,7 +131,34 @@ export function commitSubjects(repoRoot, base, head) {
   return out(repoRoot, ['log', '--format=%s', `${base}..${head}`]).split('\n').filter(Boolean);
 }
 
-/** [{ sha, date, message }] reachable from ref, newest first. */
+/** [{ path, symlink }] for every file in the tree at `sha`. */
+export function listFiles(repoRoot, sha) {
+  return git(repoRoot, ['ls-tree', '-r', '-z', sha]).stdout.split('\0').filter(Boolean).map((entry) => {
+    const tab = entry.indexOf('\t');
+    return { path: entry.slice(tab + 1), symlink: entry.startsWith('120000 ') };
+  });
+}
+
+/**
+ * [{ path, line }] for lines at `sha` matching the extended regex, in the
+ * text files at the exact `paths`. The output format is pinned with flags (a
+ * repo's grep.lineNumber or grep.column would add fields), and a line that
+ * still doesn't parse throws instead of being skipped.
+ */
+export function grep(repoRoot, sha, pattern, paths) {
+  if (paths.length === 0) return [];
+  const args = ['grep', '-I', '-z', '--no-line-number', '--no-column', '--no-color', '--full-name', '-E', '-e', pattern, sha, '--'];
+  const res = git(repoRoot, [...args, ...paths.map((p) => `:(literal)${p}`)], { allowFail: true });
+  if (res.code === 1 && !res.stderr.trim()) return []; // no match
+  if (res.code !== 0) throw new Error(`git grep failed: ${(res.stderr || res.stdout).trim().split('\n')[0]}`);
+  const prefix = `${sha}:`;
+  return res.stdout.split('\n').filter(Boolean).map((l) => {
+    const at = l.indexOf('\0');
+    if (!l.startsWith(prefix) || at < 0) throw new Error(`git grep: unexpected output ${JSON.stringify(l.slice(0, 80))}`);
+    return { path: l.slice(prefix.length, at), line: l.slice(at + 1) };
+  });
+}
+
 // Stable patch id of a commit's change against its first parent, or of its
 // undo with `reverse`; null for a commit with no change (or no parent). A
 // manual revert has the same id as its merge's undo, whatever its message
@@ -146,6 +173,7 @@ export function patchId(repoRoot, sha, { reverse = false } = {}) {
   return res.code === 0 ? res.stdout.trim().split(/\s+/)[0] || null : null;
 }
 
+/** [{ sha, date, message }] reachable from ref, newest first. */
 export function log(repoRoot, ref = 'HEAD') {
   const raw = git(repoRoot, ['log', '--format=%H%x1f%cI%x1f%B%x1e', ref]).stdout;
   return raw

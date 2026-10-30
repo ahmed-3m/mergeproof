@@ -4,7 +4,7 @@ A release is a semver tag on `main`. [`.github/workflows/release.yml`](../.githu
 
 ## Before the first npm publish
 
-- **Repository visibility.** Publishing puts the full source on npm, where anyone can read it, so decide this first. While the repository is private, npm provenance fails (the workflow falls back to a plain publish), the README badges and links point at a page outsiders cannot open, and other repositories cannot use `ahmed-3m/mergeproof@v1`.
+- **Repository visibility.** The repository is public, so npm provenance works, the README links resolve for everyone, and other repositories can use `ahmed-3m/mergeproof@v1`. If it is ever made private again, provenance fails (the workflow falls back to a plain publish) and other repositories lose the action.
 - **`NPM_TOKEN` secret.** Create a granular access token on npmjs.com with read and write access to the `@ahmed-3m` scope, then store it with `gh secret set NPM_TOKEN`. Without it the workflow logs `NPM_TOKEN is not set; skipping npm publish` and still moves `v1` and creates the Release. That is what happened for v0.1.0 to v0.1.2.
 
 ## Cutting a release

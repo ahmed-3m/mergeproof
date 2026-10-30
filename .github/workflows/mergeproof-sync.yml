@@ -1,0 +1,76 @@
+# Mergeproof — nightly ledger sync.
+#
+# Settles outcomes (open → pending → clean or reverted), opens a human-triage
+# issue for every newly reverted merge, and pushes the ledger branch. Never
+# gates or merges anything.
+#
+# Mergeproof's own copy of templates/workflows/mergeproof-sync.yml, with the
+# action pinned to a commit on main (see mergeproof-pr.yml).
+
+name: mergeproof-sync
+
+on:
+  schedule:
+    - cron: '17 3 * * *' # nightly, off the hour to dodge the top-of-hour load
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: read
+
+jobs:
+  sync:
+    if: vars.MERGEPROOF_MODE != 'off'
+    concurrency:
+      # Sync runs one at a time; mergeproof-pr's apply jobs also push to the
+      # ledger branch and retry on top of whichever push lands first.
+      group: mergeproof-ledger
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+      - name: Check out the ledger branch (or start it as an orphan)
+        env:
+          LEDGER_BRANCH: mergeproof-ledger
+          LEDGER_DIR: .mergeproof-ledger
+        run: |
+          set -euo pipefail
+          if git show-ref --verify --quiet "refs/remotes/origin/$LEDGER_BRANCH"; then
+            git worktree add "$LEDGER_DIR" "origin/$LEDGER_BRANCH"
+          else
+            # Fresh install: the branch does not exist yet. Start it empty.
+            git worktree add --detach "$LEDGER_DIR" HEAD
+            git -C "$LEDGER_DIR" checkout --orphan "$LEDGER_BRANCH"
+            git -C "$LEDGER_DIR" rm -r --quiet --ignore-unmatch . || true
+          fi
+      - name: Settle the ledger — mergeproof sync
+        uses: ahmed-3m/mergeproof@9889e3c37c7c95e3312845799fb6de0c55f386e7 # main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          command: sync
+          args: --ledger .mergeproof-ledger/ledger.json
+      - name: Commit and push the ledger
+        env:
+          LEDGER_BRANCH: mergeproof-ledger
+          LEDGER_DIR: .mergeproof-ledger
+        run: |
+          set -euo pipefail
+          if [ -z "$(git -C "$LEDGER_DIR" status --porcelain)" ]; then
+            echo "Ledger unchanged; nothing to push."
+            exit 0
+          fi
+          git -C "$LEDGER_DIR" add -A
+          git -C "$LEDGER_DIR" -c user.name='github-actions[bot]' \
+            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -m 'chore: settle mergeproof outcomes'
+          # One rebase-and-retry if another run won the race to push first.
+          if ! git -C "$LEDGER_DIR" push origin "HEAD:$LEDGER_BRANCH"; then
+            git -C "$LEDGER_DIR" fetch origin "$LEDGER_BRANCH"
+            git -C "$LEDGER_DIR" rebase "origin/$LEDGER_BRANCH"
+            git -C "$LEDGER_DIR" push origin "HEAD:$LEDGER_BRANCH"
+          fi

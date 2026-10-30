@@ -1,9 +1,13 @@
 # Mergeproof — issue to PR (flow 2).
 #
-# A trusted issue — opened by an allowlisted author, or labeled `agent` by a
-# collaborator who can write — starts the coding agent with the skill for the
-# issue's kind. The agent implements, self-checks and opens a PR; this workflow
-# then posts the dispatch-marker comment that mergeproof-pr reads back.
+# A trusted issue — opened by an allowlisted author, or labeled `agent` or
+# `agent:urgent` by a collaborator who can write — starts the coding agent
+# with the skill for the issue's kind. `agent:urgent` is the same start, for a
+# maintainer escalating an issue straight to the agent; it is namespaced so a
+# repo's own `urgent` triage label never starts the agent. Either label on an
+# issue that already has an open agent PR starts nothing new. The agent
+# implements, self-checks and opens a PR; this workflow then posts the
+# dispatch-marker comment that mergeproof-pr reads back.
 # Retries arrive as workflow_dispatch from mergeproof-pr's apply job.
 #
 # The agent's only view of the issue is the trusted context file the ctx step
@@ -18,7 +22,7 @@
 # bundle and handoff files as untrusted data before the only push happens.
 #
 # `mergeproof init` installs this file together with the skills under
-# .mergeproof/skills/ and the `agent` and `needs-human` labels.
+# .mergeproof/skills/ and the `agent`, `agent:urgent` and `needs-human` labels.
 
 name: mergeproof-issue
 
@@ -48,22 +52,22 @@ permissions:
 # One run per issue at a time, for the whole run: a group on each job would
 # only stop two copies of the same job overlapping, so a second run could
 # still interleave with the first between jobs (and GitHub may drop a
-# queued job of either). A label event for any label but `agent` can never
-# start the agent, so it gets a group of its own and never queues in front
-# of a real run or pushes one out: GitHub keeps one pending run per group.
+# queued job of either). A label event for any label but `agent` or `agent:urgent`
+# can never start the agent, so it gets a group of its own and never queues in
+# front of a real run or pushes one out: GitHub keeps one pending run per group.
 concurrency:
-  group: ${{ (github.event_name == 'workflow_dispatch' || github.event.action == 'opened' || github.event.label.name == 'agent') && format('mergeproof-issue-{0}', github.event.issue.number || github.event.inputs.issue) || format('mergeproof-issue-noop-{0}', github.run_id) }}
+  group: ${{ (github.event_name == 'workflow_dispatch' || github.event.action == 'opened' || github.event.label.name == 'agent' || github.event.label.name == 'agent:urgent') && format('mergeproof-issue-{0}', github.event.issue.number || github.event.inputs.issue) || format('mergeproof-issue-noop-{0}', github.run_id) }}
   cancel-in-progress: false
 
 jobs:
   agent:
     # Kill switch first. Prompt-injection guard: a Bot never starts a run;
     # `opened` only for authors in the comma-separated MERGEPROOF_AUTHORS
-    # variable; `labeled` only for the `agent` label by a non-bot sender — the
-    # context step then checks the sender is a write/maintain/admin
-    # collaborator. A dispatch (a human, or the PR workflow's retry) always
-    # runs.
-    if: vars.MERGEPROOF_MODE != 'off' && (github.event_name == 'workflow_dispatch' || (github.event.issue.user.type != 'Bot' && ((github.event.action == 'opened' && vars.MERGEPROOF_AUTHORS != '' && contains(format(',{0},', vars.MERGEPROOF_AUTHORS), format(',{0},', github.event.issue.user.login))) || (github.event.action == 'labeled' && github.event.label.name == 'agent' && github.event.sender.type != 'Bot'))))
+    # variable; `labeled` only for the `agent` or `agent:urgent` label by a non-bot
+    # sender — the context step then checks the sender is a
+    # write/maintain/admin collaborator. A dispatch (a human, or the PR
+    # workflow's retry) always runs.
+    if: vars.MERGEPROOF_MODE != 'off' && (github.event_name == 'workflow_dispatch' || (github.event.issue.user.type != 'Bot' && ((github.event.action == 'opened' && vars.MERGEPROOF_AUTHORS != '' && contains(format(',{0},', vars.MERGEPROOF_AUTHORS), format(',{0},', github.event.issue.user.login))) || (github.event.action == 'labeled' && (github.event.label.name == 'agent' || github.event.label.name == 'agent:urgent') && github.event.sender.type != 'Bot'))))
     runs-on: ubuntu-latest
     outputs:
       stopped: ${{ steps.ctx.outputs.stopped }}
@@ -131,10 +135,29 @@ jobs:
             case "$perm" in
               admin | maintain | write) ;;
               *)
-                echo "::error::the agent label needs a collaborator with write, maintain or admin (sender $SENDER has $perm)"
+                echo "::error::the agent and agent:urgent labels need a collaborator with write, maintain or admin (sender $SENDER has $perm)"
                 exit 1
                 ;;
             esac
+          fi
+
+          # One agent PR per issue: a fresh start (not a retry) on an issue
+          # the bot already has an open PR for starts nothing, so adding
+          # `agent:urgent` to an issue the agent is already on never opens a second
+          # PR. Runs for one issue queue (see concurrency), so a start that
+          # arrives mid-run sees the first run's PR here. A failed lookup
+          # fails the step: no run rather than a duplicate.
+          if [ -z "$PR_NUMBER" ]; then
+            [[ "$ISSUE_NUMBER" =~ ^[0-9]+$ ]] || { echo "::error::the issue must be a number (got '$ISSUE_NUMBER')"; exit 1; }
+            open_pr="$(gh pr list --repo "$REPO" --state open --limit 100 --json number,headRefName,author \
+              --jq "[.[] | select(.author.login == \"$BOT_LOGIN\" and (.headRefName | test(\"^agent/[a-z]+-$ISSUE_NUMBER-\"))) | .number] | min // empty")"
+            if [ -n "$open_pr" ]; then
+              gh issue comment "$ISSUE_NUMBER" --repo "$REPO" \
+                --body "Mergeproof: the agent already has pull request #$open_pr open for this issue, so no new run was started."
+              echo "stopped=true" >> "$GITHUB_OUTPUT"
+              echo "Issue #$ISSUE_NUMBER already has agent PR #$open_pr; not starting the agent."
+              exit 0
+            fi
           fi
 
           # Daily cap: count today's runs of this workflow (this one included).
@@ -233,10 +256,11 @@ jobs:
           if trusted "$issue_author"; then
             emit "Issue title and body — by $issue_author (trusted)" "$(printf '# %s\n\n%s' "$issue_title" "$issue_body")"
           else
-            # Untrusted author: a writer vouched by applying the agent
-            # label. The vouch counts only while the agent label is on, was
-            # last added by a trusted user (triage can label too), and
-            # neither the body nor the title changed after it was applied:
+            # Untrusted author: a writer vouched by applying a start label
+            # (agent or agent:urgent). Each label is checked on its own, and the
+            # vouch counts when one of them is on, was last added by a
+            # trusted user (triage can label too), and neither the body nor
+            # the title changed after it was applied:
             # GraphQL lastEditedAt is the body's last edit (null if never
             # edited), a title change is a RenamedTitleEvent. Comments do
             # not matter here; they are filtered by author below. The text
@@ -244,20 +268,31 @@ jobs:
             # check cannot reach the agent, and one landing before it fails
             # the check. Stale, removed or unreadable means stop.
             vouch_query='query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { issue(number: $number) { lastEditedAt timelineItems(last: 100, itemTypes: [LABELED_EVENT, UNLABELED_EVENT, RENAMED_TITLE_EVENT]) { nodes { __typename ... on LabeledEvent { createdAt actor { login } label { name } } ... on UnlabeledEvent { createdAt label { name } } ... on RenamedTitleEvent { createdAt } } } } } }'
-            vouch_jq='.data.repository.issue as $i | ([$i.timelineItems.nodes[] | select(.label.name? == "agent")] | last) as $l | if $l == null or $l.__typename != "LabeledEvent" then "stale" elif ($i.lastEditedAt // "") >= $l.createdAt then "stale" elif any($i.timelineItems.nodes[]; .__typename == "RenamedTitleEvent" and .createdAt >= $l.createdAt) then "stale" else "ok \($l.actor.login // "")" end'
+            vouch_jq='.data.repository.issue as $i | ("agent", "agent:urgent") as $n | ([$i.timelineItems.nodes[] | select(.label.name? == $n)] | last) as $l | if $l == null or $l.__typename != "LabeledEvent" then "stale \($n)" elif ($i.lastEditedAt // "") >= $l.createdAt then "stale \($n)" elif any($i.timelineItems.nodes[]; .__typename == "RenamedTitleEvent" and .createdAt >= $l.createdAt) then "stale \($n)" else "ok \($n) \($l.actor.login // "")" end'
             if ! vouch_out="$(gh api graphql -F owner="${REPO%%/*}" -F name="${REPO#*/}" -F number="$ISSUE_NUMBER" -f query="$vouch_query" --jq "$vouch_jq")"; then
-              gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body "Mergeproof could not read this issue's edit and label history, so the agent was not started. A collaborator with write access should re-apply the agent label to vouch for the issue."
+              gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body "Mergeproof could not read this issue's edit and label history, so the agent was not started. A collaborator with write access should re-apply the agent or agent:urgent label to vouch for the issue."
               echo "::error::could not read the edit and label history of issue #$ISSUE_NUMBER — not starting the agent (fail closed)"
               exit 1
             fi
-            read -r vouch vouch_by <<< "$vouch_out"
-            if [ "$vouch" = 'ok' ] && ! trusted "${vouch_by:-}"; then vouch='stale'; fi
+            # One line per label: "ok <label> <labeler>" or "stale <label>".
+            # The label comes before the login, so a missing login reads as
+            # empty (untrusted), never as the label name. trusted calls gh,
+            # so it reads /dev/null, not the lines still to come.
+            vouch='stale'
+            vouch_label=''
+            while read -r v_state v_label vouch_by; do
+              if [ "$v_state" = 'ok' ] && trusted "${vouch_by:-}" < /dev/null; then
+                vouch='ok'
+                vouch_label="$v_label"
+                break
+              fi
+            done <<< "$vouch_out"
             if [ "$vouch" != 'ok' ]; then
-              gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body "Mergeproof: this issue changed after the agent label was applied, so its text is no longer vouched for and the agent was not started. A collaborator with write access should re-apply the agent label after the last change to vouch again."
-              echo "::error::issue #$ISSUE_NUMBER was updated after the agent label was applied — not starting the agent (fail closed; a writer must re-apply the label)"
+              gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body "Mergeproof: this issue changed after the agent or agent:urgent label was applied, so its text is no longer vouched for and the agent was not started. A collaborator with write access should re-apply the label after the last change to vouch again."
+              echo "::error::issue #$ISSUE_NUMBER was updated after the agent or agent:urgent label was applied — not starting the agent (fail closed; a writer must re-apply the label)"
               exit 1
             fi
-            emit "Issue title and body — by $issue_author (vouched by the agent label, unchanged since)" "$(printf '# %s\n\n%s' "$issue_title" "$issue_body")"
+            emit "Issue title and body — by $issue_author (vouched by the $vouch_label label, unchanged since)" "$(printf '# %s\n\n%s' "$issue_title" "$issue_body")"
           fi
 
           # Comments: only from authors the same check trusts; every other
