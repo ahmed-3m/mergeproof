@@ -25,6 +25,21 @@
       ".aider*",
       ".github/copilot-instructions.md",
       "skills/**"
+    ],
+    "humanOnly": [
+      "src/tamper.mjs",
+      "src/decide.mjs",
+      "src/prove.mjs",
+      "src/ledger.mjs",
+      "src/verdictfile.mjs",
+      "src/commands/apply.mjs",
+      "src/land.mjs",
+      "action.yml",
+      "templates/**",
+      "benchmarks/**",
+      "scripts/promote.mjs",
+      "SECURITY.md",
+      "ROADMAP.md"
     ]
   },
   "agents": {
