@@ -48,12 +48,17 @@ export function mergeBase(repoRoot, a, b) {
   return out(repoRoot, ['merge-base', a, b]);
 }
 
-/** origin's default branch if known, else main or master, whichever exists. */
+/**
+ * origin's default branch if known, else the first of origin/main, origin/master,
+ * main, master that exists. Remote refs come first because they track the
+ * fetched tip; a clone without origin/HEAD (a shallow or single-branch fetch,
+ * the agent container) has them but no symbolic default.
+ */
 export function defaultBranch(repoRoot) {
   const head = git(repoRoot, ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], { allowFail: true });
   if (head.code === 0 && head.stdout.trim()) return head.stdout.trim();
-  for (const name of ['main', 'master']) {
-    if (git(repoRoot, ['rev-parse', '--verify', '--quiet', `${name}^{commit}`], { allowFail: true }).code === 0) return name;
+  for (const ref of ['origin/main', 'origin/master', 'main', 'master']) {
+    if (refExists(repoRoot, ref)) return ref;
   }
   throw new Error('cannot find the base branch; pass --base <ref>');
 }

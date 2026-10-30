@@ -7,7 +7,7 @@ import { CONFIG_FILE, parseConfig } from '../config.mjs';
 import { proveChange } from '../prove.mjs';
 import { decide } from '../decide.mjs';
 import { DEFAULT_LEDGER, readLedger, trustFor } from '../ledger.mjs';
-import { EXIT_CODES, formatVerdict, makeVerdict } from '../verdict.mjs';
+import { EXIT_CODES, MAX_NOTES, formatVerdict, makeVerdict } from '../verdict.mjs';
 import { notAnAgentPr, identityFor } from '../agents.mjs';
 import { inspect } from '../inspect.mjs';
 import { VERDICT_FILE_SCHEMA, writeVerdictFile } from '../verdictfile.mjs';
@@ -131,6 +131,17 @@ export function evaluate({ root, baseSha, headSha, config, claims, ci, issueLabe
   return { kind, files, tamperNotes, holdNotes, proof, trust, verdict: decide({ kind, tamperNotes, proof, trust, holdNotes }) };
 }
 
+// What a caller that branches on more than the verdict needs (the agent loop
+// decides readiness from these): whether a proof ran and held, and why not.
+// Additive to the frozen verdict JSON. Failed notes only, already capped at
+// three, so the reasons stay as short as the verdict's own notes.
+function proofFields(proof) {
+  return {
+    proven: proof?.ok === true && !proof.weak,
+    reasons: (proof?.notes ?? []).filter((n) => n.ok === false).map((n) => n.text).slice(0, MAX_NOTES),
+  };
+}
+
 // PROTOTYPE.md flows 1-3, in order:
 //   loadConfig → classifyKind → detectTampering → proveChange → decide
 //   → (enforce mode) merge with trailer → appendOutcome to the ledger
@@ -231,7 +242,7 @@ export async function runCheck(argv, deps = defaultDeps) {
     }
     deps.print(
       flags.json
-        ? JSON.stringify({ ...verdict, mode: 'superseded', merged: false }, null, 2)
+        ? JSON.stringify({ ...verdict, mode: 'superseded', merged: false, ...proofFields(null) }, null, 2)
         : `${formatVerdict(verdict)}\n  (superseded: the PR changed after its CI completed; nothing written)`,
     );
     return EXIT_CODES.HUMAN;
@@ -291,6 +302,6 @@ export async function runCheck(argv, deps = defaultDeps) {
       proven: result.proof?.ok === true && !(result.tamperNotes?.length > 0),
     });
   }
-  deps.print(flags.json ? JSON.stringify({ ...verdict, mode, merged }, null, 2) : text);
+  deps.print(flags.json ? JSON.stringify({ ...verdict, mode, merged, ...proofFields(result.proof) }, null, 2) : text);
   return EXIT_CODES[verdict.verdict];
 }
