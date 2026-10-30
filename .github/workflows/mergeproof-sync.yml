@@ -29,7 +29,7 @@ jobs:
       cancel-in-progress: false
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
@@ -48,7 +48,7 @@ jobs:
             git -C "$LEDGER_DIR" rm -r --quiet --ignore-unmatch . || true
           fi
       - name: Settle the ledger — mergeproof sync
-        uses: ahmed-3m/mergeproof@7a74b37044ea23523c86b5ba2d5fdb23b7bfc3ac # main
+        uses: ahmed-3m/mergeproof@9889e3c37c7c95e3312845799fb6de0c55f386e7 # main
         env:
           GH_TOKEN: ${{ github.token }}
         with:

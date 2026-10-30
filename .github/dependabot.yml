@@ -4,3 +4,7 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # One weekly PR for every action bump instead of one PR (and branch) each.
+    groups:
+      actions:
+        patterns: ['*']
