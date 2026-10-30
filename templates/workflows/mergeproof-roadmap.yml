@@ -1,0 +1,46 @@
+# Mergeproof — roadmap to proposed issues.
+#
+# A push to the default branch that changes ROADMAP.md opens one GitHub issue
+# per `ready` item, labeled `agent-proposed` (plus `bug` for a bugfix item).
+# Each opened issue ends with a `mergeproof-roadmap id=…` marker comment, and
+# the next runs match it against open AND closed issues, so an item is
+# proposed once, ever. Existing issues are never edited or closed.
+#
+# These issues start nothing by themselves: a maintainer reviews each one and
+# adds the `agent` label to start the coding agent on it.
+#
+# `mergeproof init` installs this file unchanged.
+
+name: mergeproof-roadmap
+
+on:
+  push:
+    paths: [ROADMAP.md]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  roadmap:
+    # Default branch only: the backlog is ROADMAP.md on the default branch,
+    # and a template cannot name the branch (every repo has its own).
+    if: vars.MERGEPROOF_MODE != 'off' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    concurrency:
+      # One roadmap run at a time, and never cancel one mid-way through
+      # opening issues: a cancelled run loses count of what it already opened.
+      group: mergeproof-roadmap
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - name: Open proposed issues — mergeproof roadmap
+        uses: ahmed-3m/mergeproof@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          command: roadmap

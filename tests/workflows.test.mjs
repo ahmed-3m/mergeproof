@@ -10,7 +10,7 @@ import { runProcess } from '../src/adapters/process.mjs';
 
 const ACTION = readFileSync(resolve('action.yml'), 'utf8');
 const TEMPLATE_DIR = resolve('templates/workflows');
-const TEMPLATE_FILES = ['mergeproof-pr.yml', 'mergeproof-issue.yml', 'mergeproof-sync.yml'];
+const TEMPLATE_FILES = ['mergeproof-pr.yml', 'mergeproof-issue.yml', 'mergeproof-sync.yml', 'mergeproof-roadmap.yml'];
 const TEMPLATES = Object.fromEntries(TEMPLATE_FILES.map((f) => [f, readFileSync(resolve(TEMPLATE_DIR, f), 'utf8')]));
 const FILES = { 'action.yml': ACTION, ...TEMPLATES };
 
@@ -86,7 +86,7 @@ const PR_JOBS = jobsOf(TEMPLATES['mergeproof-pr.yml']);
 const ISSUE_JOBS = jobsOf(TEMPLATES['mergeproof-issue.yml']);
 const SYNC_JOBS = jobsOf(TEMPLATES['mergeproof-sync.yml']);
 
-test('templates/workflows/ exists and ships the three templates', () => {
+test('templates/workflows/ exists and ships the four templates', () => {
   assert.ok(existsSync(TEMPLATE_DIR), 'templates/workflows/ must exist');
   for (const name of TEMPLATE_FILES) {
     assert.ok(existsSync(resolve(TEMPLATE_DIR, name)), `missing templates/workflows/${name}`);
@@ -1366,6 +1366,21 @@ test('sync workflow: nightly, on the shared ledger concurrency group', () => {
   assert.match(sync, /cancel-in-progress: false/);
   assert.match(sync, /command: sync/);
   assert.match(sync, /--ledger \.mergeproof-ledger\/ledger\.json/);
+});
+
+test('roadmap workflow: ROADMAP.md pushes on the default branch, one job, no secrets', () => {
+  const roadmap = TEMPLATES['mergeproof-roadmap.yml'].replace(/\r\n/g, '\n');
+  // Trigger: pushes limited to ROADMAP.md, plus dispatch. The default-branch
+  // restriction lives in the job's if (a template cannot name the branch).
+  assert.match(roadmap, /^ {2}push:\n {4}paths: \[ROADMAP\.md\]\n {2}workflow_dispatch:$/m);
+  assert.match(roadmap, /github\.ref == format\('refs\/heads\/\{0\}', github\.event\.repository\.default_branch\)/);
+  assert.match(roadmap, /^permissions:\n {2}contents: read\n {2}issues: write$/m);
+  assert.match(roadmap, /timeout-minutes: 10/);
+  assert.match(roadmap, /group: mergeproof-roadmap\n {6}cancel-in-progress: false/);
+  assert.match(roadmap, /command: roadmap/);
+  assert.match(roadmap, /GH_TOKEN: \$\{\{ github\.token \}\}/);
+  assert.doesNotMatch(roadmap, /secrets\./, 'the roadmap workflow never needs a secret');
+  assert.doesNotMatch(roadmap, /issue edit|issue close/, 'it only opens issues, never edits or closes one');
 });
 
 test('every action is pinned by a full commit SHA, except the agent harness and mergeproof itself', () => {

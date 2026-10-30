@@ -1,6 +1,6 @@
 # Workflow templates (M2)
 
-The three templates `mergeproof init` copies into a customer's
+The four templates `mergeproof init` copies into a customer's
 `.github/workflows/`, already wired to the reusable action
 `ahmed-3m/mergeproof@v1` (this repo's `action.yml`):
 
@@ -9,6 +9,7 @@ The three templates `mergeproof init` copies into a customer's
 | `mergeproof-pr.yml` | PR → outcome | After the repo's CI completes on a PR: a `context` job resolves the PR, the dispatch marker and the attempt count; a read-only `gate` job runs `check --verdict-out --test-user mergeproof-tests` (it runs PR code, so it gets no secrets and a read-only token, and the PR's tests run as an unprivileged OS user whose leftover processes are killed before the verdict is written); the `apply` job runs `apply` (writes only here), pushes the ledger, re-dispatches the agent on RETRY while attempts remain, or labels `needs-human` when they are exhausted. |
 | `mergeproof-issue.yml` | issue → PR | An issue opened by an allowlisted author or labeled `agent` by a write-capable collaborator starts the coding agent with the skill for the issue's kind, then posts the dispatch-marker comment (`github-actions[bot]` authored) that the PR workflow reads back. The agent never reads the issue from GitHub: the context step builds a trusted issue file — title and body from the author when trusted (or, for a label start, while the title and body are unedited since the label vouched), comments only from trusted authors, plus the gate's latest PR verdict on a retry — and that file is the agent's only issue text; the prompt forbids fetching issues, PRs, comments or web pages, and `claude_args` disallows those tools as defence in depth. |
 | `mergeproof-sync.yml` | nightly | `sync` settles the ledger and opens a human-triage issue for each newly reverted merge. |
+| `mergeproof-roadmap.yml` | ROADMAP.md → issues | A push to the default branch that changes `ROADMAP.md` (or a dispatch) runs `mergeproof roadmap`: one issue per `ready` item, labeled `agent-proposed` (plus `bug` for a bugfix), deduplicated by the `mergeproof-roadmap` marker comment against open and closed issues so an item is proposed once, ever. At most 5 issues per run (`--limit`); existing issues are never edited or closed, and nothing starts until a maintainer adds the `agent` label to an issue. |
 
 
 > **Concurrency:** the apply job and the nightly sync share the
