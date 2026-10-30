@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/gate-LLM--free-58a6ff" alt="the gate never calls an LLM">
 </p>
 
-> Status: v0.1.2 — the M1 gate (`check`, `check --local`, `sync`), the check/apply CI split, and the reusable GitHub Action with workflow templates. Verified against the [pre-registered scenarios](benchmarks/specs.md). `mergeproof init` wires a repo in one command — see [Install](#install).
+> Status: v0.1.3 — the M1 gate (`check`, `check --local`, `sync`), the check/apply CI split, and the reusable GitHub Action with workflow templates. Verified against the [pre-registered scenarios](benchmarks/specs.md). `mergeproof init` wires a repo in one command — see [Install](#install).
 
 Coding agents (Copilot, Codex, OpenHands, Claude Code, GLM through Claude Code) can already turn an issue into a pull request. The hard part is deciding whether that PR is safe to merge without a human. `mergeproof` is a zero-dependency, LLM-free gate that makes that decision:
 
@@ -122,7 +122,7 @@ node --version   # >= 18.17
 npm test         # no install step, ever: zero dependencies
 ```
 
-See [AGENTS.md](AGENTS.md) for architecture and hard constraints, and [docs/architecture.md](docs/architecture.md) for the module map.
+See [AGENTS.md](AGENTS.md) for architecture and hard constraints, [docs/architecture.md](docs/architecture.md) for the module map, and [docs/releasing.md](docs/releasing.md) for cutting a release.
 
 ## License
 
