@@ -48,7 +48,7 @@ jobs:
             git -C "$LEDGER_DIR" rm -r --quiet --ignore-unmatch . || true
           fi
       - name: Settle the ledger — mergeproof sync
-        uses: ahmed-3m/mergeproof@9889e3c37c7c95e3312845799fb6de0c55f386e7 # main
+        uses: ahmed-3m/mergeproof@9db402174e5b7f87e7465f3ab67a9392bf990044 # main
         env:
           GH_TOKEN: ${{ github.token }}
         with:

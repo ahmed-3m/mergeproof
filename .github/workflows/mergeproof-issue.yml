@@ -83,7 +83,7 @@ jobs:
       # the bot token, never with GITHUB_TOKEN (whose pushes trigger nothing).
       # Full history so the agent's `mergeproof check --local` can see the
       # merge base.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
@@ -375,7 +375,7 @@ jobs:
       # still start the agent.
       - name: Run the coding agent on the issue
         if: success() && steps.ctx.outputs.stopped != 'true' && steps.ctx.outputs.harness == 'claude'
-        uses: anthropics/claude-code-action@a26b07d8c778b0c43f64618e5fd29fd0f8af72e8 # v1.0.250
+        uses: anthropics/claude-code-action@d70510b174a1244958df0b03166a54912811f3e6 # v1.0.264
         env:
           # init sets this to the Anthropic-compatible endpoint of the model
           # provider (https://api.z.ai/api/anthropic for GLM).
@@ -476,7 +476,7 @@ jobs:
       # request's head branch, whose name the ctx step resolved with the
       # agent job's own default token (this job has none to ask with).
       # Full history so `mergeproof check --local` finds the merge base.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.agent.outputs.pr-head-ref }}
           fetch-depth: 0
@@ -698,7 +698,7 @@ jobs:
       pull-requests: write
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
