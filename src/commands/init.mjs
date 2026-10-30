@@ -239,7 +239,7 @@ function configText(detected) {
   return `${JSON.stringify(out, null, 2)}\n`;
 }
 
-function fillTemplate(text, { ciWorkflow, installCommand }) {
+export function fillTemplate(text, { ciWorkflow, installCommand }) {
   const filled = text.replaceAll('{{CI_WORKFLOW}}', ciWorkflow).replaceAll('{{INSTALL_COMMAND}}', installCommand);
   // `{{NAME}}` placeholders are uppercase with no spaces; GitHub's own
   // `${{ expr }}` (always a space after ${{) must survive untouched.

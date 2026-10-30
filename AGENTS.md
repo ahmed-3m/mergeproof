@@ -17,6 +17,7 @@
 
 - Run tests: `npm test` runs every top-level `tests/*.test.mjs` through `scripts/run-tests.mjs` (extra arguments go to `node --test`); don't run `node --test tests/` directly, it would pick up `tests/fixtures/`
 - Run the CLI: `node bin/mergeproof.mjs <check|apply|sync> [...]`
+- Promote this repo: `node scripts/promote.mjs --ref <sha> --dry-run` renders this repo's workflows and skills from the templates at a release commit
 
 ## Layout
 

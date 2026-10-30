@@ -68,6 +68,8 @@ Every job of every template (`templates/workflows/`), what it may do, which secr
 
 This repository is public, so `main` can have branch protection, set by the owner in the repository settings with: pull requests required, the required CI checks (the list in `.github/workflows/main-guard.yml`) must pass, and force-push and deletion blocked. Approving reviews are deliberately not required, because the `apply` job merges with the workflow token, which cannot approve. "Require branches to be up to date" is off too: `apply` pins its merge to the gated head commit, so the merge would fail every time `main` moved and bot PRs would pile up. `.github/workflows/main-guard.yml` stays as a second line: a force-push, a commit that is not part of a merged PR, or a PR merged before its GitHub Actions checks were green fails the run and opens an issue. It detects, it does not prevent: the push runs its own copy of the guard, so a deliberate writer could weaken it in the same push, which is what the branch protection is for.
 
+This repository's agent-facing workflows (`mergeproof-pr.yml`, `mergeproof-sync.yml`, `mergeproof-issue.yml`) and skills (`.mergeproof/skills/`) are rendered from the last release's templates and skills by `scripts/promote.mjs`, pinned to a commit, and move only in a human-merged PR.
+
 ### The agent harness's subscription token
 
 When the issue workflow runs the Claude Code harness, `CLAUDE_CODE_OAUTH_TOKEN` (made with `claude setup-token`) is the secret that lets it use the owner's subscription. It is passed only to the agent step inside the credential-free agent container, never to a job that holds a write token; the publish job never sees it. The risks:

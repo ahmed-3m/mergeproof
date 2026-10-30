@@ -99,7 +99,7 @@ jobs:
       # the bot token, never with GITHUB_TOKEN (whose pushes trigger nothing).
       # Full history so the agent's `mergeproof check --local` can see the
       # merge base.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
@@ -473,7 +473,7 @@ jobs:
       # request's head branch, whose name the ctx step resolved with the
       # agent job's own default token (this job has none to ask with).
       # Full history so `mergeproof check --local` finds the merge base.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.agent.outputs.pr-head-ref }}
           fetch-depth: 0
@@ -484,7 +484,7 @@ jobs:
       # only place checkout allows) and is left out of the agent's copy of
       # the checkout below.
       - name: Check out mergeproof for the container
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ahmed-3m/mergeproof
           ref: ${{ env.MERGEPROOF_REF }}
@@ -798,7 +798,7 @@ jobs:
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
@@ -807,7 +807,7 @@ jobs:
       # the agent's path-based tamper rules with it, using git only. It never
       # executes anything from the agent's branch.
       - name: Check out mergeproof for validation
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ahmed-3m/mergeproof
           ref: ${{ env.MERGEPROOF_REF }}

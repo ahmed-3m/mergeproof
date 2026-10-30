@@ -57,7 +57,7 @@ const CONTRACT = {
   'src/commands/check.mjs': ['runCheck', 'evaluate'],
   'src/commands/apply.mjs': ['runApply'],
   'src/commands/sync.mjs': ['runSync', 'settle'],
-  'src/commands/init.mjs': ['runInit', 'detect'],
+  'src/commands/init.mjs': ['runInit', 'detect', 'fillTemplate'],
   'src/commands/dispatch.mjs': ['runDispatch', 'buildIssueFile', 'agentPrompt', 'agentEnv', 'HARNESS_BIN', 'TOKEN_ENV'],
   'src/commands/loop.mjs': ['runLoop', 'HARNESSES', 'harnessArgv', 'buildPrompt', 'infraFailure', 'INFRA_REASONS'],
   'src/adapters/process.mjs': ['runProcess'],
