@@ -99,14 +99,26 @@ function cappedBody(body, marker) {
   return `${body.slice(0, BODY_MAX - marker.length - 2).trimEnd()}\n\n${marker}`;
 }
 
+// The account the roadmap workflow opens issues as (`github.token`).
+export const DEFAULT_PROPOSER = 'github-actions[bot]';
+
+// gh reports an App author as `app/github-actions`; the REST API and the
+// UI say `github-actions[bot]`. Both name the same account.
+const normalizeLogin = (login) => String(login ?? '').toLowerCase().replace(/^app\//, '').replace(/\[bot\]$/, '');
+
 /**
  * The issues to open, in file order: `ready` items whose marker appears in no
- * existing issue body — open or closed, the caller passes both. Each becomes
+ * existing issue body — open or closed, the caller passes both. Only issues
+ * the proposer itself opened count: anyone can open an issue, so a marker
+ * pasted by someone else must not suppress an item. Each becomes
  * `{ id, title: '[MP-012] …', body, labels }` where labels carry `bug` only
  * for a bugfix (the gate's issue-label split).
  */
-export function planIssues(items, existingIssues = []) {
-  const bodies = (existingIssues ?? []).map((issue) => String(issue.body ?? ''));
+export function planIssues(items, existingIssues = [], { proposer = DEFAULT_PROPOSER } = {}) {
+  const who = normalizeLogin(proposer);
+  const bodies = (existingIssues ?? [])
+    .filter((issue) => normalizeLogin(issue.author?.login) === who)
+    .map((issue) => String(issue.body ?? ''));
   return items
     .filter((item) => item.status === 'ready' && !bodies.some((body) => body.includes(ROADMAP_MARKER(item.id))))
     .map((item) => {

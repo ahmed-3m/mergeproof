@@ -17,7 +17,7 @@ Usage:
   mergeproof check --local [--base <ref>] [--json] preflight HEAD against its base (agents run this)
   mergeproof apply <verdict-file> --pr <pr-url> [--dry-run] [--json]  land a gate verdict (write job; runs no PR code)
   mergeproof sync [--dry-run] [--json]             settle the ledger and record reverts
-  mergeproof roadmap [--file ROADMAP.md] [--limit <n>] [--dry-run] [--json]   open proposed issues for ready ROADMAP.md items
+  mergeproof roadmap [--file ROADMAP.md] [--limit <n>] [--proposer <login>] [--dry-run] [--json]   open proposed issues for ready ROADMAP.md items
   mergeproof init [--dry-run] [--yes] [--force] [--json]
                   [--agent <name>] [--model <name>] [--base-url <url>] [--bot-login <login>]
                   [--ci-workflow <name>] [--install-command <cmd>] [--test-command <cmd>]

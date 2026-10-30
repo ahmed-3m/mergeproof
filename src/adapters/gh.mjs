@@ -135,12 +135,12 @@ export function createIssue({ repo, title, body, labels = [] }) {
 }
 
 /**
- * Issues with number, title and body — `--state all` covers closed ones too,
+ * Issues with number, title, body and author — `--state all` covers closed ones too,
  * which is what the roadmap's dedupe needs: a finished item must never be
  * proposed again.
  */
 export function listIssues({ state = 'all', limit = 1000 } = {}) {
-  return JSON.parse(gh(['issue', 'list', '--state', state, '--limit', String(limit), '--json', 'number,title,body']));
+  return JSON.parse(gh(['issue', 'list', '--state', state, '--limit', String(limit), '--json', 'number,title,body,author']));
 }
 
 // ---- `mergeproof init` support (M2). Read paths used by detection and the

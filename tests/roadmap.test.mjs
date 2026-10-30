@@ -172,10 +172,22 @@ test('planIssues maps ready items to titled, labeled, marker-ended issues', () =
 
 test('planIssues dedupes against open AND closed issues', () => {
   const { items } = parseRoadmap(PLAN_DOC);
-  const withMarker = (id, state) => ({ number: 7, title: 'whatever', state, body: `finished\n\n${ROADMAP_MARKER(id)}` });
+  const withMarker = (id, state) => ({ number: 7, title: 'whatever', state, author: { login: 'app/github-actions' }, body: `finished\n\n${ROADMAP_MARKER(id)}` });
   assert.deepEqual(planIssues(items, [withMarker('MP-011', 'open')]).map((p) => p.id), ['MP-012'], 'an open issue suppresses its item');
   assert.deepEqual(planIssues(items, [withMarker('MP-012', 'closed')]).map((p) => p.id), ['MP-011'], 'a closed issue suppresses its item too');
   assert.deepEqual(planIssues(items, [{ number: 8, title: 't', state: 'open', body: null }]).map((p) => p.id), ['MP-011', 'MP-012'], 'a null body is just no marker');
+});
+
+test('planIssues counts a marker only in an issue the proposer opened', () => {
+  const { items } = parseRoadmap(PLAN_DOC);
+  const issue = (login) => ({ number: 9, title: 'x', state: 'open', author: { login }, body: ROADMAP_MARKER('MP-011') });
+  const ids = (issues, opts) => planIssues(items, issues, opts).map((p) => p.id);
+  assert.deepEqual(ids([issue('mallory')]), ['MP-011', 'MP-012'], 'a marker pasted by anyone else suppresses nothing');
+  assert.deepEqual(ids([issue('dependabot[bot]')]), ['MP-011', 'MP-012'], 'nor one from another bot');
+  assert.deepEqual(ids([issue('github-actions[bot]')]), ['MP-012'], 'the REST spelling of the workflow token counts');
+  assert.deepEqual(ids([issue('app/github-actions')]), ['MP-012'], "and so does gh's");
+  assert.deepEqual(ids([issue('octocat')], { proposer: 'OctoCat' }), ['MP-012'], '--proposer names a local runner, case-insensitively');
+  assert.deepEqual(ids([{ number: 9, title: 'x', state: 'open', body: ROADMAP_MARKER('MP-011') }]), ['MP-011', 'MP-012'], 'no author, no dedupe');
 });
 
 test('titles and bodies are capped and the marker survives the cap', () => {
@@ -302,7 +314,7 @@ test('--json prints the counts and the opened issues', async () => {
 // ---- the shipped surface --------------------------------------------------
 
 test('usage lists the roadmap command', () => {
-  assert.match(USAGE, /mergeproof roadmap \[--file ROADMAP\.md\] \[--limit <n>\] \[--dry-run\] \[--json\]/);
+  assert.match(USAGE, /mergeproof roadmap \[--file ROADMAP\.md\] \[--limit <n>\] \[--proposer <login>\] \[--dry-run\] \[--json\]/);
 });
 
 test('this repo\'s ROADMAP.md parses cleanly', () => {

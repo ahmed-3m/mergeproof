@@ -49,7 +49,7 @@ const CONTRACT = {
   'src/prove.mjs': ['proveChange'],
   'src/decide.mjs': ['decide'],
   'src/ledger.mjs': ['LEDGER_SCHEMA', 'DEFAULT_LEDGER', 'readLedger', 'writeLedger', 'appendOutcome', 'trustFor'],
-  'src/roadmap.mjs': ['parseRoadmap', 'ROADMAP_MARKER', 'planIssues'],
+  'src/roadmap.mjs': ['parseRoadmap', 'ROADMAP_MARKER', 'planIssues', 'DEFAULT_PROPOSER'],
   'src/trailer.mjs': ['TRAILER_KEY', 'formatTrailer', 'parseTrailer'],
   'src/agents.mjs': ['notAnAgentPr', 'identityFor'],
   'src/inspect.mjs': ['inspect'],

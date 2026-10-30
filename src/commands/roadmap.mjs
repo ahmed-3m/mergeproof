@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { parseFlags } from '../args.mjs';
 import { UsageError } from '../errors.mjs';
 import { EXIT_CODES } from '../verdict.mjs';
-import { parseRoadmap, planIssues } from '../roadmap.mjs';
+import { DEFAULT_PROPOSER, parseRoadmap, planIssues } from '../roadmap.mjs';
 import * as gh from '../adapters/gh.mjs';
 
 // `mergeproof roadmap` (M3 phase E): one proposed GitHub issue per `ready`
@@ -42,7 +42,7 @@ const issueNumber = (url) => {
 };
 
 export async function runRoadmap(argv, deps = defaultDeps) {
-  const { positionals, flags } = parseFlags(argv, ['dry-run', 'json'], ['file', 'limit']);
+  const { positionals, flags } = parseFlags(argv, ['dry-run', 'json'], ['file', 'limit', 'proposer']);
   if (positionals.length > 0) throw new UsageError('roadmap takes no arguments');
   const file = flags.file ?? 'ROADMAP.md';
   let limit = DEFAULT_LIMIT;
@@ -69,7 +69,9 @@ export async function runRoadmap(argv, deps = defaultDeps) {
   // One listing of open AND closed issues: the marker in a body decides what
   // was already proposed, and a closed issue counts like an open one.
   const existing = deps.gh.listIssues({ state: 'all', limit: 1000 });
-  const plan = planIssues(items, existing);
+  // --proposer: the login this run opens issues as, when it is not the
+  // workflow's github.token (a maintainer running it locally).
+  const plan = planIssues(items, existing, { proposer: flags.proposer ?? DEFAULT_PROPOSER });
   const toOpen = plan.slice(0, limit);
   const ready = items.filter((i) => i.status === 'ready');
 
