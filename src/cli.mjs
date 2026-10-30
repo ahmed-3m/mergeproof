@@ -26,6 +26,9 @@ Usage:
                                                   install mergeproof into this repo (M2)
   mergeproof dispatch <issue-number> --harness agy [--model <label>] [--vouch <digest>] [--dry-run]
                                                    run a local coding agent on an issue (maintainer machine; never the gate)
+  mergeproof loop --harness <claude|gemini|agy> --model <label> --issue-file <path> --skill-file <path> --handoff <dir>
+                  [--base <ref>] [--rounds <n>] [--timeout-min <n>] [--retry] [--json]
+                                                   run a coding harness, then check --local, in rounds (agent container only; never the gate)
   mergeproof --version | --help
 
 Options:
@@ -37,7 +40,7 @@ Options:
   --test-user <name>              check: run the PR's tests as this unprivileged OS user (sudo; Linux/macOS)
   --ledger <path>                 default .mergeproof/ledger.json
   --ref <ref>                     sync: branch whose history is scanned (default HEAD)
-  --harness <name>                dispatch: local coding agent to run (phase 1: agy); its login comes from agents.identities on the base branch, and the identity account's PAT must be in the MERGEPROOF_DISPATCH_TOKEN environment variable
+  --harness <name>                dispatch: local coding agent to run (phase 1: agy); loop: claude, gemini or agy; its login comes from agents.identities on the base branch, and the identity account's PAT must be in the MERGEPROOF_DISPATCH_TOKEN environment variable
   --bot-login <login>             init: login of the machine user whose token opens agent PRs (required)
   --base-url <url>                init: Anthropic-compatible endpoint (defaulted for glm-* models)
   --ci-workflow <name>            init: workflow whose PR CI the gate waits for (auto-detected)

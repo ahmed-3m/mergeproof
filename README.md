@@ -98,7 +98,7 @@ The worktree keeps agy out of your checkout, but it is not a sandbox: agy runs a
 
 Limits: a dispatched PR has no dispatch marker, so the gate gets no `--issue` (every agy PR is in the feature bucket, with no bugfix split) and a `RETRY` does not start agy again: run `dispatch` again or fix the PR by hand.
 
-The issue workflow can run agy instead of Claude Code: set the `MERGEPROOF_HARNESS` repo variable to `agy` (with `MERGEPROOF_AGENT=agy` and a Gemini key in `MERGEPROOF_MODEL_KEY`). It installs a pinned agy release checked by SHA-512 rather than Google's unpinned installer, and it has no tool deny-list; [`templates/README.md`](templates/README.md#the-agy-harness-mergeproof_harnessagy) covers both.
+The issue workflow runs Claude Code by default and can run Gemini CLI or agy instead: set the `MERGEPROOF_HARNESS` repo variable to `gemini` or `agy` (with a matching `MERGEPROOF_AGENT` and a Gemini key in `MERGEPROOF_MODEL_KEY`). Every harness runs through `mergeproof loop` in a credential-free container, from a release pinned by SHA-512, and a separate publish job validates the result before anything is pushed; [`templates/README.md`](templates/README.md#the-agent-harness-mergeproof_harness) covers the job split and the supply-chain and deny-list caveats.
 
 ## GitHub Actions
 
