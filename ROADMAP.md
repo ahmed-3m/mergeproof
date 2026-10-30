@@ -82,13 +82,13 @@ Acceptance:
 
 ### [MP-106] Critic rounds in the agent loop
 - kind: feature
-- status: later            # ready once `src/commands/loop.mjs` (M3 phase A2) is on main
+- status: ready
 
-One implementer pass is not always enough. In `src/commands/loop.mjs` (created by M3 phase A2), add critic rounds: `MERGEPROOF_ROUNDS` k (default 2, maximum 3); a round is implementer → `check --local --json --base $MERGEPROOF_BASE_REF` → a fresh critic invocation with Edit/Write disallowed that prints `CRITIC: PASS|FIX` plus at most 5 findings; stop when the change is proven and the critic says PASS, or when k runs out.
+`src/commands/loop.mjs` already runs up to `--rounds` (1-3) implementer passes, feeding the `check --local --json` reasons back when a change is not proven. Add a critic to each round: after `check --local`, a fresh harness invocation with Edit/Write disallowed reviews the diff against the issue and prints `CRITIC: PASS|FIX` plus at most 5 findings; FIX findings go into the next round's feedback. Stop when the change is proven and the critic says PASS, or when the rounds run out.
 
 Acceptance:
-- `runLoop` honours `MERGEPROOF_ROUNDS` with the default and the maximum enforced.
-- The PR title and body are written only when `proven` is true with no tamper notes, else `stop-comment.md`.
+- The critic runs with the harness's write tools disallowed, and its findings are capped at 5 lines in the next prompt.
+- The PR title and body are still written only when `proven` is true with no tamper notes, else `stop-comment.md`; a FIX on the last round writes `stop-comment.md`.
 - A fake harness in `tests/loop.test.mjs` drives a FIX→PASS flow and a k-exhausted flow; the loop never decides a verdict.
 
 ## Phase D — measurement
