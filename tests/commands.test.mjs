@@ -7,6 +7,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSy
 import * as sandbox from '../src/adapters/sandbox.mjs';
 import { tmpdir } from 'node:os';
 import { createRepo, testFile, FIXED_MATH, BASE_FILES } from './fixtures/repo.mjs';
+import { defaultBranch } from '../src/adapters/git.mjs';
 import { runCheck, evaluate, defaultDeps as checkDeps } from '../src/commands/check.mjs';
 import { runSync, settle, defaultDeps as syncDeps } from '../src/commands/sync.mjs';
 import { checksState, normalizePr, parsePrUrl, waitForChecks } from '../src/adapters/gh.mjs';
@@ -109,7 +110,38 @@ test('shadow mode reports MERGE but never merges, and logs the PR as open', asyn
     assert.equal(gh.calls.merge.length, 0);
     assert.deepEqual(JSON.parse(out[0]).merged, false);
     assert.equal(JSON.parse(out[0]).mode, 'shadow');
+    assert.equal(JSON.parse(out[0]).proven, true);
+    assert.deepEqual(JSON.parse(out[0]).reasons, []);
     assert.equal(readLedger(ledger).outcomes.at(-1).status, 'open');
+  } finally {
+    repo.cleanup();
+  }
+});
+
+test('--json reports proven and the failed proof notes: red CI is unproven with its reason', async () => {
+  const { repo, baseSha, headSha } = setup();
+  try {
+    const gh = fakeGh(repo, { baseSha, headSha, checks: [{ name: 'test', status: 'COMPLETED', conclusion: 'FAILURE' }] });
+    const out = [];
+    assert.equal(await runCheck([URL, ...PR_ARGS, '--json', '--dry-run'], deps(repo, gh, out)), 3, out.join('\n'));
+    const json = JSON.parse(out[0]);
+    assert.equal(json.verdict, 'RETRY');
+    assert.equal(json.proven, false);
+    assert.deepEqual(json.reasons, ['CI is red']);
+  } finally {
+    repo.cleanup();
+  }
+});
+
+test('--json from a gate that stopped before proving anything is unproven with no reasons', async () => {
+  const { repo, baseSha, headSha } = setup();
+  try {
+    const gh = fakeGh(repo, { baseSha, headSha, author: 'alice', headRef: 'feature/x' });
+    const out = [];
+    assert.equal(await runCheck([URL, ...PR_ARGS, '--json', '--dry-run'], deps(repo, gh, out)), 4);
+    const json = JSON.parse(out[0]);
+    assert.equal(json.proven, false);
+    assert.deepEqual(json.reasons, []);
   } finally {
     repo.cleanup();
   }
@@ -239,6 +271,69 @@ test('check --local runs end to end through the CLI', () => {
     assert.equal(res.status, 4, res.stdout + res.stderr);
     assert.match(res.stdout, /HUMAN \(kind: feature\)[\s\S]*feature for claude-code\/glm-5.2 not trusted yet[\s\S]*fail on base 2\/2/);
     assert.match(res.stdout, /\(local\)/);
+  } finally {
+    repo.cleanup();
+  }
+});
+
+test('check --local --json reports proven for a proof that held, and the reasons for one that did not', async () => {
+  const { repo } = setup();
+  try {
+    const args = ['--local', '--base', 'main', '--json', ...AGENT, '--ledger', DEMO];
+    repo.git(['checkout', '--quiet', 'agent/fix']);
+    const out = [];
+    // The change is a feature locally (no issue), so the demo ledger has not earned it trust: HUMAN, but proven.
+    assert.equal(await runCheck(args, deps(repo, null, out)), 4, out.join('\n'));
+    let json = JSON.parse(out[0]);
+    assert.equal(json.mode, 'local');
+    assert.equal(json.proven, true);
+    assert.deepEqual(json.reasons, []);
+
+    // A test that already passes on base proves nothing: RETRY, with the reason spelled out.
+    repo.git(['checkout', '--quiet', '-b', 'agent/weak', 'main']);
+    repo.write({ 'src/extra.mjs': 'export const extra = 1;\n', 'tests/add2.test.mjs': testFile('add again', ['assert.equal(add(2, 3), 5);']) });
+    repo.git(['add', 'src/extra.mjs', 'tests/add2.test.mjs']); // not -A: the ledger copy sits untracked in the checkout
+    repo.git(['commit', '--quiet', '-m', 'feat: add again']);
+    out.length = 0;
+    assert.equal(await runCheck(args, deps(repo, null, out)), 3, out.join('\n'));
+    json = JSON.parse(out[0]);
+    assert.equal(json.verdict, 'RETRY');
+    assert.equal(json.proven, false);
+    assert.deepEqual(json.reasons, ['new test tests/add2.test.mjs passes on base, so it proves nothing']);
+  } finally {
+    repo.cleanup();
+  }
+});
+
+test('defaultBranch falls back to origin/main and origin/master when origin/HEAD is not set', () => {
+  const upstream = createRepo();
+  const clones = [];
+  try {
+    for (const name of ['main', 'master']) {
+      const dir = mkdtempSync(join(tmpdir(), 'mp-clone-'));
+      clones.push(dir);
+      if (name === 'master') upstream.git(['branch', '-m', 'master']);
+      const clone = (args) => spawnSync('git', args, { cwd: dir, encoding: 'utf8' });
+      assert.equal(spawnSync('git', ['clone', '--quiet', upstream.dir, dir], { encoding: 'utf8' }).status, 0);
+      // As in the agent container: a checkout that has the remote branch but no origin/HEAD and no local default branch.
+      clone(['remote', 'set-head', 'origin', '--delete']);
+      clone(['checkout', '--quiet', '--detach']);
+      clone(['branch', '-D', name]);
+      assert.equal(clone(['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD']).status, 1, 'origin/HEAD is unset');
+      assert.equal(defaultBranch(dir), `origin/${name}`);
+    }
+  } finally {
+    upstream.cleanup();
+    for (const dir of clones) rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('defaultBranch prefers origin/HEAD, then local main, and still throws when nothing exists', () => {
+  const repo = createRepo();
+  try {
+    assert.equal(defaultBranch(repo.dir), 'main');
+    repo.git(['branch', '-m', 'trunk']);
+    assert.throws(() => defaultBranch(repo.dir), /pass --base/);
   } finally {
     repo.cleanup();
   }

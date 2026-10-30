@@ -1,6 +1,6 @@
 # AGENTS.md — Development guide for mergeproof
 
-`mergeproof` is a trust gate for AI-agent pull requests. The spec is [PROTOTYPE.md](PROTOTYPE.md) (milestone 1). Milestone 2 is [briefs/m2-autopilot.md](briefs/m2-autopilot.md); do not build M2 features until M1 is done.
+`mergeproof` is a trust gate for AI-agent pull requests. The spec is [PROTOTYPE.md](PROTOTYPE.md) (milestone 1). Milestone 2 is [briefs/m2-autopilot.md](briefs/m2-autopilot.md); do not build M2 features until M1 is done. Milestone 3 is [briefs/m3-self-loop.md](briefs/m3-self-loop.md) and is built after M2.
 
 ## Hard constraints (non-negotiable)
 
@@ -15,7 +15,7 @@
 
 ## Commands
 
-- Run tests: `npm test` (pins the suite list; don't run `node --test tests/` directly)
+- Run tests: `npm test` runs every top-level `tests/*.test.mjs` through `scripts/run-tests.mjs` (extra arguments go to `node --test`); don't run `node --test tests/` directly, it would pick up `tests/fixtures/`
 - Run the CLI: `node bin/mergeproof.mjs <check|apply|sync> [...]`
 
 ## Layout

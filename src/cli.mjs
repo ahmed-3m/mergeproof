@@ -1,13 +1,17 @@
 import { VERSION } from './version.mjs';
 import { EXIT_CODES } from './verdict.mjs';
 import { NotImplementedError, UsageError } from './errors.mjs';
-import { runCheck } from './commands/check.mjs';
-import { runApply } from './commands/apply.mjs';
-import { runSync } from './commands/sync.mjs';
-import { runInit } from './commands/init.mjs';
-import { runDispatch } from './commands/dispatch.mjs';
-
-const COMMANDS = { check: runCheck, apply: runApply, sync: runSync, init: runInit, dispatch: runDispatch };
+// Commands load on demand. The gate (check, apply, sync) must not even load
+// agent-side modules such as dispatch, so a bug or a dependency there can never
+// reach the code that judges a pull request; tests/structure.test.mjs pins the
+// import closure of the gate modules.
+const COMMANDS = {
+  check: () => import('./commands/check.mjs').then((m) => m.runCheck),
+  apply: () => import('./commands/apply.mjs').then((m) => m.runApply),
+  sync: () => import('./commands/sync.mjs').then((m) => m.runSync),
+  init: () => import('./commands/init.mjs').then((m) => m.runInit),
+  dispatch: () => import('./commands/dispatch.mjs').then((m) => m.runDispatch),
+};
 
 export const USAGE = `mergeproof v${VERSION} — let AI agents merge, only with proof
 
@@ -54,13 +58,13 @@ export async function main(argv) {
     return 0;
   }
 
-  const handler = COMMANDS[cmd];
-  if (!handler) {
+  if (!Object.hasOwn(COMMANDS, cmd)) {
     console.error(`mergeproof: unknown command "${cmd}"\n\n${USAGE}`);
     return EXIT_CODES.USAGE;
   }
 
   try {
+    const handler = await COMMANDS[cmd]();
     return await handler(rest);
   } catch (err) {
     if (err instanceof UsageError) {

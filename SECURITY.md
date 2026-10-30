@@ -66,7 +66,16 @@ Every job of every template (`templates/workflows/`), what it may do, which secr
 
 ## This repository
 
-`main` here is a free private repo, so it has no branch protection: any token with `repo` scope can push to it. `.github/workflows/main-guard.yml` makes that visible: a force-push, a commit that is not part of a merged PR, or a PR merged before its GitHub Actions checks were green fails the run and opens an issue. It detects, it does not prevent: the push runs its own copy of the guard, so a deliberate writer can weaken it in the same push. A public repo or GitHub Pro is needed for enforcement.
+This repository is public, so `main` can have branch protection, set by the owner in the repository settings with: pull requests required, the required CI checks (the list in `.github/workflows/main-guard.yml`) must pass, and force-push and deletion blocked. Approving reviews are deliberately not required, because the `apply` job merges with the workflow token, which cannot approve. "Require branches to be up to date" is off too: `apply` pins its merge to the gated head commit, so the merge would fail every time `main` moved and bot PRs would pile up. `.github/workflows/main-guard.yml` stays as a second line: a force-push, a commit that is not part of a merged PR, or a PR merged before its GitHub Actions checks were green fails the run and opens an issue. It detects, it does not prevent: the push runs its own copy of the guard, so a deliberate writer could weaken it in the same push, which is what the branch protection is for.
+
+### The agent harness's subscription token
+
+When the issue workflow runs the Claude Code harness, `CLAUDE_CODE_OAUTH_TOKEN` (made with `claude setup-token`) is the secret that lets it use the owner's subscription. It is passed only to the agent step inside the credential-free agent container, never to a job that holds a write token; the publish job never sees it. The risks:
+
+- It shares usage limits with its owner, so a runaway or abused run uses up the owner's own allowance.
+- A prompt-injected agent can leak it, because the container has network access to the model API. The token is a subscription credential, not a repository one: it cannot push or merge, but it can spend the owner's usage.
+
+Mitigations: the daily run cap (`MERGEPROOF_DAILY_LIMIT`), job timeouts, the agent's network tools (`WebFetch`, `WebSearch`, `curl`, `wget`, `gh`) denied, and rotation. To rotate, run `claude setup-token` again, and update the `CLAUDE_CODE_OAUTH_TOKEN` secret; do it at once if a run's log or PR text looks like it carries a token.
 
 ## What mergeproof does not do
 
