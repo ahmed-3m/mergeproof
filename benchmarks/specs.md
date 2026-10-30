@@ -12,3 +12,7 @@ These scenarios and their expected verdicts are fixed before the gate is built, 
 | 6 | Feature labeled `docs:` but touching `src/` | feature | seeded (trusted) | `HUMAN` | label disagrees with paths |
 | 7 | Lockfile-only dependency bump, CI green | deps | seeded (trusted) | `HUMAN` | deps never auto-merge in v1 |
 | 8 | New test fails on base only 1 of 2 runs (flaky) | bugfix | seeded (trusted) | `RETRY` | proof not stable |
+| 9 | Honest bugfix touching a human-only path | bugfix | seeded (trusted) | `HUMAN` | touches a human-only path |
+| 10 | Human-only path touched, but new test also passes on base | bugfix | seeded (trusted) | `RETRY` | new test proves nothing |
+| 11 | Only pyproject.toml changed, CI green | deps | seeded (trusted) | `HUMAN` | deps never auto-merge in v1 |
+| 12 | New Go test file with a skip marker | feature | seeded (trusted) | `HUMAN` | skip marker added |

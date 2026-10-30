@@ -61,8 +61,8 @@ function fingerprint(paths) {
  * OS user, and everything it still runs is killed before the proof is read.
  */
 export function evaluate({ root, baseSha, headSha, config, claims, ci, issueLabels = [], agent, model, ledger, ledgerPath = null, testUser = null }, deps = defaultDeps) {
-  const { kind, files, testFiles, tamperNotes } = inspect({ root, baseSha, headSha, config, claims, issueLabels }, deps);
-  if (tamperNotes.length > 0) return { kind, files, tamperNotes, proof: null, verdict: decide({ kind, tamperNotes }) };
+  const { kind, files, testFiles, tamperNotes, holdNotes } = inspect({ root, baseSha, headSha, config, claims, issueLabels }, deps);
+  if (tamperNotes.length > 0) return { kind, files, tamperNotes, holdNotes, proof: null, verdict: decide({ kind, tamperNotes }) };
 
   const newTests = files.filter((f) => f.status === 'A' && testFiles.includes(f.path)).map((f) => f.path);
   const trees = {};
@@ -120,15 +120,15 @@ export function evaluate({ root, baseSha, headSha, config, claims, ci, issueLabe
   }
   if (tampered) {
     const note = { ok: false, rule: 'testRunTamperedRepo', text: 'test run changed the git config, hooks or ledger' };
-    return { kind, files, tamperNotes: [note], proof: null, tampered, verdict: decide({ kind, tamperNotes: [note] }) };
+    return { kind, files, tamperNotes: [note], holdNotes, proof: null, tampered, verdict: decide({ kind, tamperNotes: [note] }) };
   }
   // Tampering found during the proof (a dropped test count), not a failed
   // proof: HUMAN with no retry. proof.ok is false, so the PR is never recorded.
   if (proof.tamperNotes?.length > 0) {
-    return { kind, files, tamperNotes: proof.tamperNotes, proof, verdict: decide({ kind, tamperNotes: proof.tamperNotes }) };
+    return { kind, files, tamperNotes: proof.tamperNotes, holdNotes, proof, verdict: decide({ kind, tamperNotes: proof.tamperNotes }) };
   }
   const trust = kind ? trustFor(ledger, { kind, agent, model }, config.trust) : null;
-  return { kind, files, tamperNotes, proof, trust, verdict: decide({ kind, tamperNotes, proof, trust }) };
+  return { kind, files, tamperNotes, holdNotes, proof, trust, verdict: decide({ kind, tamperNotes, proof, trust, holdNotes }) };
 }
 
 // PROTOTYPE.md flows 1-3, in order:
