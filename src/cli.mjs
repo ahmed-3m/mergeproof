@@ -11,6 +11,7 @@ const COMMANDS = {
   sync: () => import('./commands/sync.mjs').then((m) => m.runSync),
   init: () => import('./commands/init.mjs').then((m) => m.runInit),
   dispatch: () => import('./commands/dispatch.mjs').then((m) => m.runDispatch),
+  loop: () => import('./commands/loop.mjs').then((m) => m.runLoop),
 };
 
 export const USAGE = `mergeproof v${VERSION} — let AI agents merge, only with proof

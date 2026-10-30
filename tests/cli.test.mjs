@@ -32,6 +32,18 @@ test('unknown command exits with the usage code', () => {
   assert.match(res.stderr, /unknown command "explode"/);
 });
 
+test('every command in the usage text is one the CLI runs', () => {
+  // The issue workflow calls `mergeproof loop`; a command that is documented
+  // but not registered fails there as "unknown command", after the agent ran.
+  const usage = run(['--help']).stdout;
+  const commands = [...new Set([...usage.matchAll(/^ {2}mergeproof ([a-z]+)/gm)].map((m) => m[1]))];
+  assert.ok(commands.includes('loop'), 'the usage lists loop');
+  for (const cmd of commands) {
+    const res = run([cmd, '--bogus-flag-for-test']);
+    assert.doesNotMatch(res.stderr, /unknown command/, `${cmd} is documented but not registered`);
+  }
+});
+
 test('check validates its arguments before running', () => {
   assert.equal(run(['check']).status, 2);
   assert.equal(run(['check', 'https://github.com/o/r/pull/1', '--local']).status, 2);
