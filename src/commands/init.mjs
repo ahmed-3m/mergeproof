@@ -37,7 +37,7 @@ export const defaultDeps = {
 // never the cwd, so `npx mergeproof init` reads the installed templates.
 const WORKFLOW_TEMPLATES_DIR = new URL('../../templates/workflows/', import.meta.url);
 const SKILLS_DIR = new URL('../../skills/', import.meta.url);
-const WORKFLOWS = ['mergeproof-pr.yml', 'mergeproof-issue.yml', 'mergeproof-sync.yml'];
+const WORKFLOWS = ['mergeproof-pr.yml', 'mergeproof-issue.yml', 'mergeproof-sync.yml', 'mergeproof-roadmap.yml'];
 const SKILLS = ['bugfix', 'feature'];
 const LEDGER_BRANCH = 'mergeproof-ledger';
 

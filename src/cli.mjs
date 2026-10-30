@@ -4,10 +4,11 @@ import { NotImplementedError, UsageError } from './errors.mjs';
 import { runCheck } from './commands/check.mjs';
 import { runApply } from './commands/apply.mjs';
 import { runSync } from './commands/sync.mjs';
+import { runRoadmap } from './commands/roadmap.mjs';
 import { runInit } from './commands/init.mjs';
 import { runDispatch } from './commands/dispatch.mjs';
 
-const COMMANDS = { check: runCheck, apply: runApply, sync: runSync, init: runInit, dispatch: runDispatch };
+const COMMANDS = { check: runCheck, apply: runApply, sync: runSync, roadmap: runRoadmap, init: runInit, dispatch: runDispatch };
 
 export const USAGE = `mergeproof v${VERSION} — let AI agents merge, only with proof
 
@@ -16,6 +17,7 @@ Usage:
   mergeproof check --local [--base <ref>] [--json] preflight HEAD against its base (agents run this)
   mergeproof apply <verdict-file> --pr <pr-url> [--dry-run] [--json]  land a gate verdict (write job; runs no PR code)
   mergeproof sync [--dry-run] [--json]             settle the ledger and record reverts
+  mergeproof roadmap [--file ROADMAP.md] [--limit <n>] [--proposer <login>] [--dry-run] [--json]   open proposed issues for ready ROADMAP.md items
   mergeproof init [--dry-run] [--yes] [--force] [--json]
                   [--agent <name>] [--model <name>] [--base-url <url>] [--bot-login <login>]
                   [--ci-workflow <name>] [--install-command <cmd>] [--test-command <cmd>]

@@ -40,6 +40,7 @@ npx @ahmed-3m/mergeproof check <pr-url> --head <sha> --verdict-out verdict.json 
 npx @ahmed-3m/mergeproof apply verdict.json --pr <pr-url> --head <sha> --agent <name> --model <name>  # lands the verdict, labels needs-human on HUMAN
 npx @ahmed-3m/mergeproof check --local      # preflight, run by agents before opening a PR
 npx @ahmed-3m/mergeproof sync               # settle the ledger, record reverts
+npx @ahmed-3m/mergeproof roadmap            # open agent-proposed issues for ready ROADMAP.md items (a maintainer still labels each `agent`)
 
 # Local or manual runs only (never in a CI job that holds a write token, because it runs PR test code in the same process):
 npx @ahmed-3m/mergeproof check https://github.com/you/repo/pull/42 --agent claude-code --model glm-5.2 --issue 17
@@ -63,7 +64,7 @@ read -rs MERGEPROOF_BOT_TOKEN && export MERGEPROOF_BOT_TOKEN   # optional: same 
 npx @ahmed-3m/mergeproof init --model <m> --bot-login <bot>
 ```
 
-`init` runs inside your repository (a git repo with a `pull_request` CI workflow and a `scripts.test`). It detects the install command from the lockfile, the test command, the test paths and the CI workflow, then writes `.mergeproof.json` (always `mode: shadow`), the three workflow templates from [`templates/workflows/`](templates/README.md) with their placeholders filled, and the bugfix and feature skills under `.mergeproof/skills/`. Existing files are never silently replaced (use `--force`), `--dry-run` prints the full plan without writing, and re-runs are idempotent.
+`init` runs inside your repository (a git repo with a `pull_request` CI workflow and a `scripts.test`). It detects the install command from the lockfile, the test command, the test paths and the CI workflow, then writes `.mergeproof.json` (always `mode: shadow`), the four workflow templates from [`templates/workflows/`](templates/README.md) with their placeholders filled, and the bugfix and feature skills under `.mergeproof/skills/`. Existing files are never silently replaced (use `--force`), `--dry-run` prints the full plan without writing, and re-runs are idempotent.
 
 It also creates the `agent`, `agent:urgent` and `needs-human` labels (a writer adding `agent` or `agent:urgent` to an issue starts the coding agent on it), sets the `MERGEPROOF_AGENT`, `MERGEPROOF_MODEL`, `MERGEPROOF_BOT_LOGIN` (and, for `glm-*` models, `MERGEPROOF_MODEL_BASE_URL`) repository variables, and pushes `MERGEPROOF_MODEL_KEY` / `MERGEPROOF_BOT_TOKEN` as secrets — their values are read from the environment variables of the same name and travel to `gh secret set` on stdin, never in argv or logs; when unset, init prints the exact `gh secret set` command to run yourself. Remote changes need `--yes` (or an interactive `y`); every run finishes with a read-only verification of branch protection, the bot's permission and the token guidance, and never changes protection settings itself. Branch protection and rulesets on a private repo need GitHub Pro, Team or Enterprise; without them init reports those checks as `unknown`, and nothing stops the bot user from merging its own PR.
 
@@ -102,7 +103,7 @@ The issue workflow can run agy instead of Claude Code: set the `MERGEPROOF_HARNE
 
 ## GitHub Actions
 
-This repo's [`action.yml`](action.yml) is the reusable `ahmed-3m/mergeproof@v1` composite action (`check` | `apply` | `sync`), and [`templates/workflows/`](templates/README.md) ships the three workflow templates — issue to agent PR, PR to gate + apply, nightly ledger sync. `mergeproof init` copies them into your repo and fills in `{{CI_WORKFLOW}}` and `{{INSTALL_COMMAND}}` — the placeholders, repo variables and secrets are documented in [`templates/README.md`](templates/README.md), and every job's permissions in [SECURITY.md](SECURITY.md#workflow-permissions).
+This repo's [`action.yml`](action.yml) is the reusable `ahmed-3m/mergeproof@v1` composite action (`check` | `apply` | `sync` | `roadmap`), and [`templates/workflows/`](templates/README.md) ships the four workflow templates — issue to agent PR, PR to gate + apply, nightly ledger sync, and ROADMAP.md items to `agent-proposed` issues. `mergeproof init` copies them into your repo and fills in `{{CI_WORKFLOW}}` and `{{INSTALL_COMMAND}}` — the placeholders, repo variables and secrets are documented in [`templates/README.md`](templates/README.md), and every job's permissions in [SECURITY.md](SECURITY.md#workflow-permissions).
 
 Mergeproof gates its own agent PRs too, in `enforce` mode: a PR whose author is in `agents.logins` and whose branch starts with `agent/` (never the branch name alone) gets a verdict comment, and merges on its own only once its kind has earned trust (see [Cold start & trust](#cold-start--trust)). The setup is [`.mergeproof.json`](.mergeproof.json) and [`.github/workflows/mergeproof-pr.yml`](.github/workflows/mergeproof-pr.yml), which pins the action to a commit on `main` rather than `@v1`.
 
