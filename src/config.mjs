@@ -19,13 +19,16 @@ export function defaultConfig() {
       // Files under a tests glob that are not tests themselves: never proven on their own.
       testSupport: ['**/fixtures/**', '**/__fixtures__/**', '**/__snapshots__/**', '**/__mocks__/**', '**/helpers/**', '**/*.snap', '**/*.json', '**/conftest.py', '**/__init__.py', '**/testdata/**'],
       docs: ['docs/**', '**/*.md'],
+      // Everything an install or build reads to resolve, fetch or run dependency
+      // code, including files that execute at install time (.pnpmfile.cjs,
+      // .yarn/ plugins) and toolchain pins: a change to any of them is deps.
       manifests: [
         'package.json', 'package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml',
-        '.npmrc', '.yarnrc', '.yarnrc.yml', 'bun.lock', 'bun.lockb',
-        'pyproject.toml', 'setup.py', 'setup.cfg', 'requirements*.txt', '**/requirements*.txt',
-        'Pipfile', 'Pipfile.lock', 'poetry.lock', 'uv.lock',
-        'go.mod', 'go.sum', 'go.work', 'go.work.sum', 'vendor/**',
-        'Cargo.toml', 'Cargo.lock', '**/Cargo.toml', 'rust-toolchain', 'rust-toolchain.toml', '.cargo/**',
+        '.npmrc', '.yarnrc', '.yarnrc.yml', '.yarn/**', '.pnpmfile.cjs', 'pnpm-workspace.yaml', 'bun.lock', 'bun.lockb', '.nvmrc', '.node-version', '.tool-versions',
+        '**/pyproject.toml', '**/setup.py', '**/setup.cfg', '**/*requirements*.txt', '**/requirements*.in', '**/requirements/**', '**/constraints*.txt',
+        '**/Pipfile', '**/Pipfile.lock', '**/poetry.lock', '**/uv.lock', '.python-version',
+        '**/go.mod', '**/go.sum', 'go.work', 'go.work.sum', '**/vendor/**',
+        '**/Cargo.toml', '**/Cargo.lock', 'rust-toolchain', 'rust-toolchain.toml', '**/.cargo/**',
       ],
       // Instructions coding agents read on every run: an edit steers every later agent PR, so it is never docs.
       agentInstructions: ['AGENTS.md', 'AGENT.md', 'CLAUDE.md', 'CLAUDE.local.md', 'GEMINI.md', 'CONVENTIONS.md', '.cursorrules', '.windsurfrules', '.clinerules', '.roorules', '**/.clinerules/**', '**/.cursor/**', '**/.windsurf/**', '**/.claude/**', '**/.gemini/**', '**/.codex/**', '**/.agents/**', '**/.roo/**', '**/.junie/**', '**/.kiro/**', '.aider*', '.github/copilot-instructions.md'],
