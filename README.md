@@ -54,6 +54,7 @@ It uses plain, deterministic code. It never calls an LLM, so the agent being jud
    | tampering, deps, or no kind fits | `HUMAN` |
    | weak proof (e.g. the new test already passes on base) | `RETRY` |
    | impossible proof (suite red on base) | `HUMAN` |
+   | touches a `paths.humanOnly` path | `HUMAN` |
    | kind not yet trusted for this agent and model | `HUMAN` |
    | otherwise | `MERGE` |
 
@@ -67,7 +68,7 @@ Install into your repo (needs a `pull_request` CI workflow and a `scripts.test`)
 npx @ahmed-3m/mergeproof init --model <model> --bot-login <bot>
 ```
 
-`init` writes `.mergeproof.json` (in `shadow` mode), three workflows and the agent skills. Use `--dry-run` to preview. It never overwrites files without `--force`.
+`init` writes `.mergeproof.json` (in `shadow` mode), four workflows and the agent skills. Use `--dry-run` to preview. It never overwrites files without `--force`.
 
 Check one PR by hand:
 
@@ -91,6 +92,7 @@ The output is one line plus at most three notes, failures first.
 | `check --local` | Preflight your branch. Agents run this before opening a PR. |
 | `apply <verdict-file> --pr <pr-url>` | Land a verdict: merge, comment, record the outcome. Runs no PR code. |
 | `sync` | Nightly: settle outcomes and record reverts. |
+| `roadmap` | Open one proposed issue per `ready` item in `ROADMAP.md`. A maintainer still labels each `agent`. |
 | `init` | Install mergeproof into the current repo. |
 | `dispatch <issue> --harness agy` | Run agy on an issue from your machine ([docs/dispatch.md](docs/dispatch.md)). |
 
@@ -106,6 +108,7 @@ Optional `.mergeproof.json` in the repo root. It is always read from the **base 
 | `testCommand` | `npm test` | Runs the full suite. |
 | `testFileCommand` | `node --test` | Runs one test file. |
 | `agents.logins` | `[]` | Who counts as an agent. Empty means nothing is gated. |
+| `paths.humanOnly` | `[]` | Paths that always need a human, even for a trusted kind. |
 | `trust.minOutcomes` | `10` | Settled outcomes a kind needs before it merges on its own. |
 
 Every key and default: [docs/architecture.md](docs/architecture.md#config-mergeproofjson).
@@ -125,19 +128,21 @@ Kill switch: set the `MERGEPROOF_MODE` repository variable to `off` to stop ever
 
 ## GitHub Actions
 
-Use the action `ahmed-3m/mergeproof@v1` ([action.yml](action.yml)). Inputs: `command` (`check`, `apply` or `sync`), `args`, `node-version`. Output: `exit-code`.
+Use the action `ahmed-3m/mergeproof@v1` ([action.yml](action.yml)). Inputs: `command` (`check`, `apply`, `sync` or `roadmap`), `args`, `node-version`. Output: `exit-code`.
 
-`init` installs three workflows:
+`init` installs four workflows:
 
 | Workflow | What it does |
 |---|---|
-| `mergeproof-issue.yml` | An issue from an allowlisted author, or one a writer labels `agent`, starts the coding agent (Claude Code or agy). |
+| `mergeproof-issue.yml` | An issue from an allowlisted author, or one a writer labels `agent`, starts the coding agent. |
 | `mergeproof-pr.yml` | After CI: a read-only gate job, then an apply job. `RETRY` re-runs the agent (up to 3 attempts). |
 | `mergeproof-sync.yml` | Nightly ledger sync. |
+| `mergeproof-roadmap.yml` | When `ROADMAP.md` changes: opens proposed issues for its `ready` items. |
 
-The gate job runs the PR's tests with no secrets and a read-only token. Only the apply job can write.
+- **Coding agent:** `MERGEPROOF_HARNESS` picks `claude` (default), `gemini` or `agy`. Each runs in a credential-free container; a separate job checks its output before anything is pushed.
+- **Gate job:** runs the PR's tests with no secrets and a read-only token. Only the apply job can write.
 
-Variables, secrets and the agy harness: [templates/README.md](templates/README.md). Job permissions: [SECURITY.md](SECURITY.md#workflow-permissions).
+Variables, secrets and harness caveats: [templates/README.md](templates/README.md). Job permissions: [SECURITY.md](SECURITY.md#workflow-permissions).
 
 ## This repo gates itself
 
@@ -157,7 +162,8 @@ npm run demo   # see demo/README.md
 | [AGENTS.md](AGENTS.md) | Hard constraints and conventions for contributors and agents |
 | [docs/architecture.md](docs/architecture.md) | Modules, tamper rules, proof, decision table, config schema |
 | [docs/dispatch.md](docs/dispatch.md) | Running agy locally with `dispatch` |
-| [templates/README.md](templates/README.md) | Workflows, variables, secrets, agy harness |
+| [templates/README.md](templates/README.md) | Workflows, variables, secrets, agent harnesses |
+| [ROADMAP.md](ROADMAP.md) | Planned work, proposed to agents as issues |
 | [SECURITY.md](SECURITY.md) | Permissions and reporting a vulnerability |
 | [benchmarks/specs.md](benchmarks/specs.md) | Pre-registered gate scenarios |
 | [docs/releasing.md](docs/releasing.md), [CHANGELOG.md](CHANGELOG.md) | Releases |

@@ -44,4 +44,4 @@ The worktree is **not a sandbox**. agy runs as your OS user with permission prom
 - A dispatched PR has no dispatch marker, so the gate gets no `--issue`. Every agy PR lands in the feature bucket (no bugfix split).
 - A `RETRY` does not restart agy. Run `dispatch` again or fix the PR by hand.
 
-To run agy from GitHub Actions instead, see [the agy harness](../templates/README.md#the-agy-harness-mergeproof_harnessagy).
+To run agy from GitHub Actions instead, see [the agent harness](../templates/README.md#the-agent-harness-mergeproof_harness).

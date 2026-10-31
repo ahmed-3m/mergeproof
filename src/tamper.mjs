@@ -23,7 +23,7 @@ export const SAFE_PATH = /^[A-Za-z0-9_@+.][A-Za-z0-9_@+./-]*$/;
 const GATE_FILES = [CONFIG_FILE, '.mergeproof/**', '.github/**'];
 
 const SKIP_MARKER =
-  /\b(?:describe|it|test|context|suite)\.(?:skip|only|todo)\b|\b(?:xit|xdescribe|xtest|fit|fdescribe)\s*\(|@pytest\.mark\.(?:skip|skipif|xfail)\b|\bt\.(?:skip|todo)\s*\(|\b(?:skip|todo)\s*:\s*true\b/;
+  /\b(?:describe|it|test|context|suite)\.(?:skip|only|todo)\b|\b(?:xit|xdescribe|xtest|fit|fdescribe)\s*\(|@pytest\.mark\.(?:skip|skipif|xfail)\b|\bt\.(?:skip|todo|Skip|SkipNow|Skipf)\s*\(|\b(?:skip|todo)\s*:\s*true\b|#\[\s*ignore\b[^\]]*\]|@unittest\.skip|\bpytest\.skip\s*\(|\bself\.skipTest\s*\(/;
 
 // Claimed kind from a Conventional Commit prefix or a label. feature and bugfix
 // count as one family because paths can't tell them apart.

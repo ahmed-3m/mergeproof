@@ -4,6 +4,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CONFIG_FILE, defaultConfig, loadConfig, parseConfig } from '../src/config.mjs';
+import { matchesAny } from '../src/glob.mjs';
 import { FileFormatError } from '../src/errors.mjs';
 
 test('no config file means all defaults', () => {
@@ -49,6 +50,8 @@ test('invalid config fails loudly with the offending key', () => {
     ['{ "paths": { "tests": "tests/**" } }', /must be an array/],
     ['{ "paths": { "tests": [""] } }', /non-empty strings/],
     ['{ "paths": { "testSupport": [""] } }', /"paths.testSupport" must contain only non-empty strings/],
+    ['{ "paths": { "humanOnly": [""] } }', /"paths.humanOnly" must contain only non-empty strings/],
+    ['{ "paths": { "humanOnly": "not-an-array" } }', /"paths.humanOnly" must be an array/],
     ['{ "limits": { "ciWaitSec": -1 } }', /"limits.ciWaitSec" must be an integer from 0 to 3600/],
     ['{ "paths": null }', /"paths" must be an object/],
     ['{ "testCommand": "  " }', /must not be empty/],
@@ -70,4 +73,31 @@ test('agents.identities maps a login to its own trust bucket', () => {
   const cfg = parseConfig(JSON.stringify({ agents: { logins: ['claude-bot', 'agy-bot'], identities } }));
   assert.deepEqual(cfg.agents.identities, identities);
   assert.deepEqual(defaultConfig().agents.identities, {}, 'the default is an empty map');
+});
+
+test('multi-ecosystem manifest defaults match expected lockfiles and exclude source', () => {
+  const manifests = defaultConfig().paths.manifests;
+  const match = (p) => matchesAny(p, manifests);
+  assert.ok(match('pyproject.toml'));
+  assert.ok(match('go.sum'));
+  assert.ok(match('Cargo.lock'));
+  assert.ok(match('crates/x/Cargo.toml'));
+  assert.ok(match('requirements-dev.txt'));
+  assert.ok(match('sub/requirements-dev.txt'));
+  assert.ok(match('svc/pyproject.toml'), 'svc/pyproject.toml');
+  assert.ok(match('svc/go.sum'), 'svc/go.sum');
+  assert.ok(match('crates/x/Cargo.lock'), 'crates/x/Cargo.lock');
+  assert.ok(match('.pnpmfile.cjs'), '.pnpmfile.cjs');
+  assert.ok(match('.yarn/plugins/x.cjs'), '.yarn/plugins/x.cjs');
+  assert.ok(match('pnpm-workspace.yaml'), 'pnpm-workspace.yaml');
+  assert.ok(match('requirements/base.txt'), 'requirements/base.txt');
+  assert.ok(match('requirements.in'), 'requirements.in');
+  assert.ok(match('constraints.txt'), 'constraints.txt');
+  assert.ok(match('x/vendor/a.go'), 'x/vendor/a.go');
+  assert.ok(match('.cargo/config.toml'), '.cargo/config.toml');
+  assert.ok(match('.python-version'), '.python-version');
+  assert.ok(!match('src/vendor.mjs'));
+  assert.ok(!match('docs/requirements.md'));
+  assert.ok(!match('src/cargo.mjs'));
+  assert.ok(!match('src/cargo.lock.mjs'));
 });

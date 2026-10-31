@@ -37,11 +37,24 @@ function sh(cwd, args) {
   return res.stdout.trim();
 }
 
-export function createRepo(baseFiles = BASE_FILES) {
+export function createRepo(baseFiles = BASE_FILES, extraConfig = null) {
   const dir = mkdtempSync(join(tmpdir(), 'mp-fixture-'));
   sh(dir, ['init', '--quiet', '--initial-branch=main']);
   for (const [k, v] of [['user.email', 'fixture@example.com'], ['user.name', 'Fixture'], ['commit.gpgsign', 'false'], ['core.autocrlf', 'false']]) {
     sh(dir, ['config', k, v]);
+  }
+  const files = { ...baseFiles };
+  if (extraConfig) {
+    const current = JSON.parse(files['.mergeproof.json'] || '{}');
+    const merged = { ...current };
+    for (const [k, v] of Object.entries(extraConfig)) {
+      if (v && typeof v === 'object' && !Array.isArray(v)) {
+        merged[k] = { ...(merged[k] || {}), ...v };
+      } else {
+        merged[k] = v;
+      }
+    }
+    files['.mergeproof.json'] = JSON.stringify(merged, null, 2);
   }
   const repo = {
     dir,
@@ -71,7 +84,7 @@ export function createRepo(baseFiles = BASE_FILES) {
       rmSync(dir, { recursive: true, force: true });
     },
   };
-  repo.write(baseFiles).commit('chore: initial');
+  repo.write(files).commit('chore: initial');
   return repo;
 }
 

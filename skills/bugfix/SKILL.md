@@ -1,6 +1,6 @@
 ---
 name: mergeproof-bugfix
-version: 2
+version: 3
 description: Use when you are the coding agent dispatched on a bug-labeled issue in a repo gated by mergeproof and must land the fix as a pull request the gate can prove.
 ---
 
@@ -85,8 +85,13 @@ is enforced by the gate as tampering: instant `HUMAN`, no retry.
      suite red, the new test passes on base, or flakiness. Fix exactly what
      they name, then rerun the suite and the gate.
    - `HUMAN` (exit 4): a tamper note means undo whatever caused it; that run
-     is dead and more work on top cannot revive it. Any other `HUMAN`
-     (untrusted kind, suite already red on base) means hand off (step 9).
+     is dead and more work on top cannot revive it. Any other `HUMAN` is not
+     yours to settle: locally the gate also says it when the kind is not
+     trusted yet, which says nothing about your proof. If a note names a proof
+     problem (suite red, the new test passes on base, flaky), fix it as for
+     `RETRY`. If the only reason is the untrusted kind, carry on to step 6:
+     the gate on the pull request decides. Hand off (step 9) only for a real
+     blocker, such as a suite that is already red on base.
 3. Every fix round here counts toward the 3 rounds in step 6.
 
 ## 6. Critic pass
@@ -146,9 +151,11 @@ is enforced by the gate as tampering: instant `HUMAN`, no retry.
 
 ## 9. When stuck
 
-Stop and comment on the issue when: the bug is ambiguous or not reproducible;
-the fix needs a dependency, an existing-test edit, or a diff over the limit;
-or you have spent all 3 rounds without a clean gate. Say what you tried, what
+Stop and comment on the issue only for a decision a human must make: the bug
+is ambiguous or not reproducible; the fix needs a dependency, a secret or
+permission you lack, an existing-test edit, a protected path or a diff over
+the limit; or you have spent all 3 rounds without a clean gate. A `HUMAN`
+from `check --local` for an untrusted kind is not a reason to stop. Say what you tried, what
 failed, and the gate verdicts. Push the branch if one exists so a human can
 pick it up. Never label anything yourself — maintainers own labels — and never
 open a pull request you know is broken just to show progress.

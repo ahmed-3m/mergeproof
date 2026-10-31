@@ -10,4 +10,4 @@ Per-kind playbooks the coding agent follows before opening a PR. Each skill is a
 | docs | next | Docs paths only, links and code samples work |
 | deps | never | Deps always go to a human |
 
-Every skill runs `mergeproof check --local`, then gets a fresh-context critic pass, for up to 3 rounds before the PR opens. The workflow logs the skill to the ledger as `--skill mergeproof-bugfix@2` — `name@version`, taken from the frontmatter — so each skill version earns its own track record, and `benchmarks/` scores each version before release.
+Every skill runs `mergeproof check --local`, then gets a fresh-context critic pass, for up to 3 rounds before the PR opens. The workflow logs the skill to the ledger as `--skill mergeproof-bugfix@3` — `name@version`, taken from the frontmatter — so each skill version earns its own track record, and `benchmarks/` scores each version before release.

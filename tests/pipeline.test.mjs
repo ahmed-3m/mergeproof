@@ -57,6 +57,16 @@ test('each tamper rule fires on its own violation', () => {
     [{ files: [...base, { path: 'tests/old.test.js', status: 'D', added: 0, deleted: 9 }] }, 'existingTestDeleted'],
     [{ addedLines: { 'tests/a.test.js': ["test.skip('adds', () => {})"] } }, 'skipMarkerAdded'],
     [{ addedLines: { 'tests/a.test.js': ['it.only("x", fn)'] } }, 'skipMarkerAdded'],
+    [{ addedLines: { 'pkg/a_test.go': ['t.Skip("not ready")'] } }, 'skipMarkerAdded'],
+    [{ addedLines: { 'pkg/a_test.go': ['t.SkipNow()'] } }, 'skipMarkerAdded'],
+    [{ addedLines: { 'pkg/a_test.go': ['t.Skipf("skip %d", 1)'] } }, 'skipMarkerAdded'],
+    [{ addedLines: { 'tests/a.rs': ['#[ignore]'] } }, 'skipMarkerAdded'],
+    [{ addedLines: { 'tests/a.rs': ['#[ignore = "flaky"]'] } }, 'skipMarkerAdded'],
+    [{ addedLines: { 'tests/test_a.py': ['@unittest.skip("later")'] } }, 'skipMarkerAdded'],
+    [{ addedLines: { 'tests/test_a.py': ['@unittest.skipIf(sys.platform == "win32", "not on windows")'] } }, 'skipMarkerAdded'],
+    [{ addedLines: { 'tests/test_a.py': ['@unittest.skipUnless(has_feature, "needs feature")'] } }, 'skipMarkerAdded'],
+    [{ addedLines: { 'tests/test_a.py': ['pytest.skip("skipping")'] } }, 'skipMarkerAdded'],
+    [{ addedLines: { 'tests/test_a.py': ['self.skipTest("skip this test")'] } }, 'skipMarkerAdded'],
     [{ claims: { title: 'docs: typo' } }, 'kindLabelMismatch'],
     [{ claims: { labels: ['documentation'] } }, 'kindLabelMismatch'],
     [{ claims: { subjects: ['chore(deps): bump'] } }, 'kindLabelMismatch'],
@@ -75,6 +85,7 @@ test('each tamper rule fires on its own violation', () => {
     [{ files: [...base, { path: '--exec=x.js', status: 'A', added: 1, deleted: 0 }] }, 'unsafePath'],
   ];
   for (const [over, rule] of cases) assert.deepEqual(rules(tamperCtx(over)), [rule], JSON.stringify(over));
+  assert.deepEqual(rules(tamperCtx({ addedLines: { 'pkg/a_test.go': ['skipped := false'] } })), [], 'skipped := false must not match');
 });
 
 test('instructionImports resolves @path imports against the importing file', () => {
@@ -353,6 +364,12 @@ test('decide follows the table in order', () => {
   const merge = decide({ kind: 'feature', tamperNotes: [], proof: strong, trust: trusted });
   assert.equal(merge.verdict, 'MERGE');
   assert.deepEqual(merge.notes.map((n) => n.text), ['proof holds', 'trusted']);
+  const hold = [{ ok: false, text: 'touches a human-only path: src/rules.mjs' }];
+  const held = decide({ kind: 'feature', tamperNotes: [], proof: strong, trust: trusted, holdNotes: hold });
+  assert.equal(held.verdict, 'HUMAN');
+  assert.deepEqual(held.notes.map((n) => n.text), ['touches a human-only path: src/rules.mjs', 'proof holds']);
+  const heldWeak = decide({ kind: 'feature', tamperNotes: [], proof: { ok: false, weak: true, notes: [{ ok: false, text: 'weak' }] }, trust: trusted, holdNotes: hold });
+  assert.equal(heldWeak.verdict, 'RETRY', 'weak proof outranks holdNotes');
 });
 
 test('weak proof outranks missing trust, so the agent gets to retry', () => {

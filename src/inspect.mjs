@@ -94,7 +94,7 @@ function importedInstructions(root, baseSha, config, deps) {
  * of trusting the verdict file's kind.
  * @param {{ root: string, baseSha: string, headSha: string, config: object,
  *           claims: { title?: string, labels?: string[], subjects: string[] }, issueLabels?: string[] }} input
- * @returns {{ kind: string|null, files: object[], testFiles: string[], addedLines: object, tamperNotes: object[] }}
+ * @returns {{ kind: string|null, files: object[], testFiles: string[], addedLines: object, tamperNotes: object[], holdNotes: object[] }}
  */
 export function inspect({ root, baseSha, headSha, config, claims, issueLabels = [] }, deps = defaultDeps) {
   const files = deps.git.changedFiles(root, baseSha, headSha);
@@ -109,5 +109,8 @@ export function inspect({ root, baseSha, headSha, config, claims, issueLabels = 
   const addedLines = deps.git.addedLines(root, baseSha, headSha, testFiles);
   const instructionImports = importedInstructions(root, baseSha, config, deps);
   const tamperNotes = detectTampering({ kind, files, addedLines, claims, config, instructionImports });
-  return { kind, files, testFiles, addedLines, tamperNotes };
+  const humanOnly = config.paths?.humanOnly ?? [];
+  const holdPath = touchedPaths.find((p) => matchesAny(p, humanOnly));
+  const holdNotes = holdPath ? [{ ok: false, text: `touches a human-only path: ${holdPath}` }] : [];
+  return { kind, files, testFiles, addedLines, tamperNotes, holdNotes };
 }
