@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Changed
 - docs: README rewritten against the current setup: command and config reference, action inputs and output, the full tamper list and proof per kind, the coding-agent harnesses, and how this repo gates itself (including its gemini harness).
+- docs: README cut to about half its length for humans and agents alike: an at-a-glance list, short steps and tables, and links to the detail docs. The local agy `dispatch` guide moves to `docs/dispatch.md`.
 
 ### Fixed
 - docs: the README pipeline diagram centres each stage label in its card (the labels sat on the cards' left edges), and the hero's terminal card runs `check` on a PR URL, as the CLI requires, instead of a bare number.
