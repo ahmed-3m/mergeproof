@@ -4,6 +4,9 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Changed
+- docs: README rewritten against the current setup: command and config reference, action inputs and output, the full tamper list and proof per kind, the coding-agent harnesses, and how this repo gates itself (including its gemini harness).
+
 ## [0.1.3] - 2026-10-30
 
 ### Security
