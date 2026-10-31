@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/gate-LLM--free-58a6ff" alt="the gate never calls an LLM">
 </p>
 
-> **Status: v0.1.3.** Shipped: the gate (`check`, `check --local`, `apply`, `sync`), `mergeproof init`, the reusable GitHub Action with its workflow templates (Claude Code or agy as the coding agent), and local `dispatch` for agy. Verified against the [pre-registered scenarios](benchmarks/specs.md).
+> **Status: v0.2.0.** Shipped: the gate (`check`, `check --local`, `apply`, `sync`), `paths.humanOnly`, `mergeproof init`, the reusable GitHub Action with its workflow templates (Claude Code, Gemini CLI or agy as the coding agent, each in a credential-free container through `mergeproof loop`), `mergeproof roadmap`, and local `dispatch` for agy. Verified against the [pre-registered scenarios](benchmarks/specs.md).
 
 Coding agents (Copilot, Codex, OpenHands, Claude Code with Anthropic or GLM models, Gemini CLI, agy) can already turn an issue into a pull request. The hard part is deciding whether that PR is safe to merge without a human. `mergeproof` makes that decision with plain, deterministic code: zero dependencies, and the gate never calls an LLM, so the agent being judged cannot talk its way past it.
 
@@ -246,6 +246,7 @@ Until a kind has earned trust, every verdict here is `HUMAN` too.
 |---|---|---|---|
 | **M1: core CLI** | `check`, `check --local`, `sync`, config, ledger, trailer | shipped | [PROTOTYPE.md](PROTOTYPE.md) |
 | **M2: autopilot package** | `mergeproof init`, reusable GitHub Action, issue → skill-guided agent → PR → gate, same-PR retries, shadow mode | shipped (v0.1.x) | [briefs/m2-autopilot.md](briefs/m2-autopilot.md) |
+| **M3: self-development loop** | `mergeproof loop` in a credential-free container, `paths.humanOnly`, multi-ecosystem defaults, `ROADMAP.md` → proposed issues, promotion from a release | in progress (v0.2.x) | [briefs/m3-self-loop.md](briefs/m3-self-loop.md) |
 | v2 | GitHub App, hosted dashboard, org policies | planned | — |
 
 ## Development
