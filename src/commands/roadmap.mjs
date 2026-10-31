@@ -18,6 +18,9 @@ export const defaultDeps = {
 };
 
 const DEFAULT_LIMIT = 5;
+// Issues read for the dedupe; a full page may be cut short (newest first), so
+// it stops the run rather than re-propose an item whose issue fell off it.
+const LIST_LIMIT = 1000;
 const MAX_LIMIT = 20;
 
 // The labels this command puts on the issues it opens (`bug` rides along on
@@ -68,7 +71,10 @@ export async function runRoadmap(argv, deps = defaultDeps) {
 
   // One listing of open AND closed issues: the marker in a body decides what
   // was already proposed, and a closed issue counts like an open one.
-  const existing = deps.gh.listIssues({ state: 'all', limit: 1000 });
+  const existing = deps.gh.listIssues({ state: 'all', limit: LIST_LIMIT });
+  if (existing.length >= LIST_LIMIT) {
+    throw new Error(`the repo has at least ${LIST_LIMIT} issues, more than one listing reads, so already-proposed items cannot be told apart; nothing was opened`);
+  }
   // --proposer: the login this run opens issues as, when it is not the
   // workflow's github.token (a maintainer running it locally).
   const plan = planIssues(items, existing, { proposer: flags.proposer ?? DEFAULT_PROPOSER });

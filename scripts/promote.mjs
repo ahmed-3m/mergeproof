@@ -138,7 +138,8 @@ export function promote(opts, deps = {}) {
   // Skills are copied byte for byte; a file removed from skills/<name> must
   // not linger in the copy, or the repo would run a skill nobody ships.
   const skills = join(root, 'skills');
-  for (const dir of readdirSync(skills, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort()) {
+  const skillDirs = readdirSync(skills, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
+  for (const dir of skillDirs) {
     const source = join(skills, dir);
     const target = join(root, '.mergeproof', 'skills', dir);
     const wanted = listFiles(source);
@@ -150,6 +151,16 @@ export function promote(opts, deps = {}) {
       log(`${dryRun ? 'would remove' : 'removed'} .mergeproof/skills/${dir}/${rel}`);
     }
     if (!dryRun && existsSync(target)) pruneEmpty(target);
+  }
+  // A whole skill removed from skills/ goes from the copy too.
+  const copies = join(root, '.mergeproof', 'skills');
+  const stale = existsSync(copies) ? readdirSync(copies, { withFileTypes: true }).filter((e) => e.isDirectory() && !skillDirs.includes(e.name)).map((e) => e.name).sort() : [];
+  for (const dir of stale) {
+    for (const rel of listFiles(join(copies, dir))) {
+      changes.push(`.mergeproof/skills/${dir}/${rel}`);
+      log(`${dryRun ? 'would remove' : 'removed'} .mergeproof/skills/${dir}/${rel}`);
+    }
+    if (!dryRun) rmSync(join(copies, dir), { recursive: true });
   }
 
   const since = givenSince ?? gitOut(run, root, ['describe', '--tags', '--abbrev=0', '--match', 'v[0-9]*', `${ref}^`]);

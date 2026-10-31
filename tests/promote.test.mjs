@@ -204,6 +204,14 @@ test('skills are copied byte for byte and a file removed from skills/<name> leav
     assert.ok(!existsSync(join(repo.dir, '.mergeproof', 'skills', 'bugfix', 'extra.bin')));
     assert.ok(!existsSync(join(repo.dir, '.mergeproof', 'skills', 'bugfix', 'nested')), 'the emptied directory goes too');
     assert.ok(existsSync(join(repo.dir, '.mergeproof', 'skills', 'bugfix', 'SKILL.md')));
+
+    // A whole skill removed from skills/ leaves the copy as well.
+    rmSync(join(repo.dir, 'skills', 'feature'), { recursive: true });
+    repo.git('commit', '--quiet', '-am', 'drop the feature skill');
+    const dropped = run();
+    assert.ok(dropped.lines.includes('removed .mergeproof/skills/feature/SKILL.md'));
+    assert.ok(!existsSync(join(repo.dir, '.mergeproof', 'skills', 'feature')));
+    assert.ok(existsSync(join(repo.dir, '.mergeproof', 'skills', 'bugfix', 'SKILL.md')));
   });
 });
 

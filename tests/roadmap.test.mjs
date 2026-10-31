@@ -243,6 +243,14 @@ test('runRoadmap opens one labeled issue per not-yet-proposed ready item', async
   );
 });
 
+test('a listing that may be cut short opens nothing (fail closed)', async () => {
+  const gh = fakeGh({ issues: Array.from({ length: 1000 }, (_, i) => ({ number: i + 1, title: 't', body: '' })) });
+  const out = [];
+  await assert.rejects(runRoadmap([], depsFor({ 'ROADMAP.md': PLAN_DOC }, gh, out)), /at least 1000 issues/);
+  assert.equal(gh.calls.issue.length, 0);
+  assert.equal(gh.calls.label.length, 0);
+});
+
 test('--limit caps how many issues one run opens, in file order', async () => {
   const gh = fakeGh();
   const out = [];
