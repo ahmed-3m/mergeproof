@@ -110,6 +110,7 @@ const MERGE_VERDICT = {
   skill: 'bugfix@1',
   attempts: 1,
   issue: 3,
+  reasons: [],
 };
 
 function writeVerdict(dir, mutate) {
@@ -473,7 +474,7 @@ test('malformed verdict files are rejected before anything is fetched or written
   const { repo, baseSha, headSha } = setup({ mode: 'enforce' });
   try {
     const cases = [
-      [(d) => { d.schema = 'mergeproof-verdict@2'; }, /schema must be/],
+      [(d) => { d.schema = 'mergeproof-verdict@99'; }, /schema must be/],
       [(d) => { d.headSha = 'not-a-sha'; }, /headSha must be/],
       [(d) => { d.verdict = 'MAYBE'; }, /verdict must be one of/],
       [(d) => { d.url = 'https://github.com/acme/app/issues/77'; }, /url must be a pull request URL/],

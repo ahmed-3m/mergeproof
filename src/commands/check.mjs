@@ -10,7 +10,7 @@ import { DEFAULT_LEDGER, readLedger, trustFor } from '../ledger.mjs';
 import { EXIT_CODES, MAX_NOTES, formatVerdict, makeVerdict } from '../verdict.mjs';
 import { notAnAgentPr, identityFor } from '../agents.mjs';
 import { inspect } from '../inspect.mjs';
-import { VERDICT_FILE_SCHEMA, writeVerdictFile } from '../verdictfile.mjs';
+import { VERDICT_FILE_SCHEMA, writeVerdictFile, MAX_REASONS } from '../verdictfile.mjs';
 import { land } from '../land.mjs';
 import * as git from '../adapters/git.mjs';
 import * as gh from '../adapters/gh.mjs';
@@ -238,7 +238,7 @@ export async function runCheck(argv, deps = defaultDeps) {
     // refuses a moved head before it reads anything else from the file.
     const verdict = makeVerdict('HUMAN', { kind: null, notes: [{ ok: false, text: 'PR changed after its CI completed; the new head gets its own gate run' }] });
     if (flags['verdict-out'] !== null) {
-      writeHandoff({ headSha: flags.head, kind: null, verdict: verdict.verdict, notes: verdict.notes, proven: false });
+      writeHandoff({ headSha: flags.head, kind: null, verdict: verdict.verdict, notes: verdict.notes, proven: false, reasons: [] });
     }
     deps.print(
       flags.json
@@ -300,6 +300,9 @@ export async function runCheck(argv, deps = defaultDeps) {
       verdict: verdict.verdict,
       notes: verdict.notes,
       proven: result.proof?.ok === true && !(result.tamperNotes?.length > 0),
+      // The structured weak-proof codes (MP-103), capped like any file bound;
+      // the proof's own notes can name more new tests than a verdict may carry.
+      reasons: (result?.proof?.reasons ?? []).slice(0, MAX_REASONS),
     });
   }
   deps.print(flags.json ? JSON.stringify({ ...verdict, mode, merged, ...proofFields(result.proof) }, null, 2) : text);

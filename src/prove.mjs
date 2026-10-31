@@ -1,5 +1,6 @@
 import { bucketPaths } from './classify.mjs';
 import { matchesAny } from './glob.mjs';
+import { renderReason } from './reasons.mjs';
 
 // Proof required per kind (PROTOTYPE.md flow 2):
 //   feature, bugfix  new test files fail on base (baseFailRuns/baseFailRuns, new tests only)
@@ -32,6 +33,10 @@ import { matchesAny } from './glob.mjs';
 
 const pass = (text) => ({ ok: true, text });
 const fail = (text) => ({ ok: false, text });
+// A failing note with the structured reason behind it (MP-102): the text is
+// rendered from the reason, and `reason` travels on the proof result so the
+// verdict file can carry the code instead of free text.
+const failReason = (reason) => ({ ok: false, text: renderReason(reason), reason });
 
 // The base tree has the PR's new test files checked out (they fail there), so
 // an honest PR counts the same cases on both sides, whatever its kind.
@@ -44,7 +49,15 @@ function countDropped(base, head) {
 function result(notes, { blocked = false, tamperNotes = [] } = {}) {
   // Tampering is never weak: a retry would only teach better cheating.
   const failed = notes.some((n) => !n.ok) || tamperNotes.length > 0;
-  return { ok: !failed, weak: failed && !blocked && tamperNotes.length === 0, notes, tamperNotes };
+  return {
+    ok: !failed,
+    weak: failed && !blocked && tamperNotes.length === 0,
+    // The notes stay strictly { ok, text }: they flow into verdict notes and
+    // the verdict file. The structured reasons travel separately.
+    notes: notes.map(({ ok, text }) => ({ ok, text })),
+    reasons: notes.filter((n) => !n.ok && n.reason).map((n) => n.reason),
+    tamperNotes,
+  };
 }
 
 // Runs the full suite on head up to 1 + headReruns times; the first green run
@@ -61,10 +74,10 @@ function headSuite(ctx) {
 // `head` reuses an already-run head suite instead of running it again.
 function ciNote(ctx, head = null) {
   if (ctx.ci === 'green') return pass('CI green');
-  if (ctx.ci === 'red') return fail('CI is red');
+  if (ctx.ci === 'red') return failReason({ code: 'CI_RED' });
   if (ctx.ci === 'pending') return fail('CI has not finished');
   const suite = head ?? headSuite(ctx);
-  return suite.green ? pass('full suite green on head') : fail('full suite fails on head');
+  return suite.green ? pass('full suite green on head') : failReason({ code: 'SUITE_RED_ON_HEAD' });
 }
 
 // A new helper, fixture or snapshot under a test glob is not a test of its
@@ -75,13 +88,21 @@ function ciNote(ctx, head = null) {
 const TEST_NAMES = ['**/*.test.*', '**/*.spec.*'];
 const isSupport = (p, config) => !matchesAny(p, TEST_NAMES) && matchesAny(p, config.paths.testSupport);
 
+// The PR's added test files that can prove a change: added (status A), under
+// a tests glob, not quarantined, and a test rather than support. `apply`
+// re-derives the same list to validate a verdict file's reasons (MP-104), so
+// the two can never drift.
+export function newTestFiles(files, config) {
+  return files
+    .filter((f) => f.status === 'A' && matchesAny(f.path, config.paths.tests))
+    .map((f) => f.path)
+    .filter((p) => !matchesAny(p, config.quarantine) && !isSupport(p, config));
+}
+
 function proveNewTests(ctx) {
   const { baseFailRuns, headPassRuns } = ctx.config.proof;
-  const newTests = ctx.files
-    .filter((f) => f.status === 'A' && matchesAny(f.path, ctx.config.paths.tests))
-    .map((f) => f.path)
-    .filter((p) => !matchesAny(p, ctx.config.quarantine) && !isSupport(p, ctx.config));
-  if (newTests.length === 0) return [fail('no new test file to prove the change')];
+  const newTests = newTestFiles(ctx.files, ctx.config);
+  if (newTests.length === 0) return [failReason({ code: 'NO_NEW_TEST' })];
 
   const baseFails = Object.fromEntries(newTests.map((t) => [t, 0]));
   for (let i = 0; i < baseFailRuns; i++) {
@@ -89,8 +110,8 @@ function proveNewTests(ctx) {
   }
   const notes = [];
   for (const t of newTests) {
-    if (baseFails[t] === 0) notes.push(fail(`new test ${t} passes on base, so it proves nothing`));
-    else if (baseFails[t] < baseFailRuns) notes.push(fail(`new test ${t} is flaky on base (failed ${baseFails[t]}/${baseFailRuns})`));
+    if (baseFails[t] === 0) notes.push(failReason({ code: 'NEW_TEST_PASSES_ON_BASE', path: t }));
+    else if (baseFails[t] < baseFailRuns) notes.push(failReason({ code: 'FLAKY_ON_BASE', path: t, n: baseFails[t], m: baseFailRuns }));
   }
   if (notes.length > 0) return notes;
 
@@ -99,8 +120,8 @@ function proveNewTests(ctx) {
     for (const t of ctx.runHead(newTests).passed) if (t in headPasses) headPasses[t]++;
   }
   for (const t of newTests) {
-    if (headPasses[t] === 0) notes.push(fail(`new test ${t} fails on head`));
-    else if (headPasses[t] < headPassRuns) notes.push(fail(`new test ${t} is flaky on head (passed ${headPasses[t]}/${headPassRuns})`));
+    if (headPasses[t] === 0) notes.push(failReason({ code: 'FAILS_ON_HEAD', path: t }));
+    else if (headPasses[t] < headPassRuns) notes.push(failReason({ code: 'FLAKY_ON_HEAD', path: t, n: headPasses[t], m: headPassRuns }));
   }
   if (notes.length > 0) return notes;
   const n = newTests.length === 1 ? 'new test' : `${newTests.length} new tests`;
@@ -108,6 +129,7 @@ function proveNewTests(ctx) {
 }
 
 /** @returns {{ ok: boolean, weak: boolean, notes: Array<{ ok: boolean, text: string }>,
+ *              reasons: Array<{ code: string, path?: string, n?: number, m?: number, pct?: number, minPct?: number }>,
  *              tamperNotes: Array<{ ok: false, rule: string, text: string }> }} */
 export function proveChange(kind, ctx) {
   const b = bucketPaths(ctx.files.map((f) => f.path), ctx.config);
@@ -121,14 +143,14 @@ export function proveChange(kind, ctx) {
     case 'docs':
       return result([pass('only docs changed'), ciNote(ctx)], { blocked: ctx.ci === 'pending' });
     case 'refactor': {
-      if (b.tests.length > 0) return result([fail('a refactor must not change test files')]);
+      if (b.tests.length > 0) return result([failReason({ code: 'REFACTOR_CHANGES_TESTS' })]);
       const base = ctx.runBase(null);
       if (base.failed.length > 0) {
-        return result([fail('full suite already fails on base, so a refactor cannot be proven')], { blocked: true });
+        return result([failReason({ code: 'SUITE_RED_ON_BASE' })], { blocked: true });
       }
       const head = headSuite(ctx);
       const notes = [pass('no test changes; full suite green on base')];
-      notes.push(head.green ? ciNote(ctx, head) : fail('full suite fails on head'));
+      notes.push(head.green ? ciNote(ctx, head) : failReason({ code: 'SUITE_RED_ON_HEAD' }));
       return result(notes, { blocked: head.green && ctx.ci === 'pending', tamperNotes: countDropped(base, head.run) });
     }
     case 'feature':

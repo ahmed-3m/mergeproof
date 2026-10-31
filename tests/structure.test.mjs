@@ -47,6 +47,7 @@ const CONTRACT = {
   'src/classify.mjs': ['KINDS', 'classifyKind', 'bucketPaths'],
   'src/tamper.mjs': ['TAMPER_RULES', 'SAFE_PATH', 'detectTampering', 'instructionImports'],
   'src/prove.mjs': ['proveChange'],
+  'src/reasons.mjs': ['REASON_CODES', 'renderReason'],
   'src/decide.mjs': ['decide'],
   'src/ledger.mjs': ['LEDGER_SCHEMA', 'DEFAULT_LEDGER', 'readLedger', 'writeLedger', 'appendOutcome', 'trustFor'],
   'src/roadmap.mjs': ['parseRoadmap', 'ROADMAP_MARKER', 'planIssues', 'DEFAULT_PROPOSER'],

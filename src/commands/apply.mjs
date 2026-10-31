@@ -5,6 +5,8 @@ import { CONFIG_FILE, parseConfig } from '../config.mjs';
 import { notAnAgentPr, identityFor } from '../agents.mjs';
 import { inspect } from '../inspect.mjs';
 import { decide } from '../decide.mjs';
+import { newTestFiles } from '../prove.mjs';
+import { REASON_CODES, REASON_PARAMS, renderReason } from '../reasons.mjs';
 import { DEFAULT_LEDGER, readLedger, trustFor } from '../ledger.mjs';
 import { EXIT_CODES, formatVerdict, makeVerdict } from '../verdict.mjs';
 import { readVerdictFile } from '../verdictfile.mjs';
@@ -17,6 +19,64 @@ export const defaultDeps = { git, gh, now: () => new Date(), sleep: (ms) => new 
 // A HUMAN verdict lands as a label so a human finds the PR; RETRY lands
 // nothing extra, the workflow counts retries itself.
 export const HUMAN_LABEL = 'needs-human';
+
+// MP-104: the text of a reason the file claims but this job cannot verify.
+// Never the file's own words, never a different verdict — the reason renders
+// "suspect" and changes nothing else.
+const SUSPECT_NOTE = 'gate reported an unverifiable reason (suspect)';
+
+// Can one file reason be true in the world this job re-derived? A known code
+// with exactly the parameters it takes, a path among the re-derived added
+// test files, and run counts/percentages that fit the config. Shape was
+// already checked by readVerdictFile; this is the semantics.
+function verifiableReason(r, { newTests, config }) {
+  if (typeof r !== 'object' || !REASON_CODES.includes(r.code)) return false;
+  const params = REASON_PARAMS[r.code] ?? [];
+  const keys = Object.keys(r).filter((k) => k !== 'code');
+  if (keys.some((k) => !params.includes(k))) return false;
+  for (const p of params) if (r[p] === undefined) return false;
+  if (params.includes('path') && !newTests.includes(r.path)) return false;
+  if (r.code === 'FLAKY_ON_BASE' && !(Number.isInteger(r.n) && r.n > 0 && r.n < r.m && r.m === config.proof.baseFailRuns)) return false;
+  if (r.code === 'FLAKY_ON_HEAD' && !(Number.isInteger(r.n) && r.n > 0 && r.n < r.m && r.m === config.proof.headPassRuns)) return false;
+  if (r.code === 'DIFF_UNCOVERED' && !(Number.isInteger(r.pct) && Number.isInteger(r.minPct) && r.pct >= 0 && r.pct < r.minPct && r.minPct <= 100)) return false;
+  return true;
+}
+
+// The weak-proof notes for a RETRY verdict file, built from what this job
+// re-derived — never from the file's text (MP-104). NO_NEW_TEST and CI_RED
+// are re-derived outright; every other reason the file carries is validated
+// against the re-derived world and rendered here. A reason that fails the
+// re-check renders "suspect" and changes nothing else, and none of this ever
+// reaches decide(): the proof stays weak either way, so the verdict stays
+// RETRY. A @1 file (no reasons) falls back to the generic weak note.
+function weakProofNotes({ reasons, kind, files, config, ci }) {
+  const notes = [];
+  const fail = (text) => notes.push({ ok: false, text });
+  const suspect = () => fail(SUSPECT_NOTE);
+  const newTests = newTestFiles(files, config);
+  const noNewTest = (kind === 'feature' || kind === 'bugfix') && newTests.length === 0;
+  if (noNewTest) fail(renderReason({ code: 'NO_NEW_TEST' }));
+  if (ci === 'red') fail(renderReason({ code: 'CI_RED' }));
+  for (const r of reasons) {
+    if (!verifiableReason(r, { newTests, config })) {
+      suspect();
+      continue;
+    }
+    // These two are never trusted from the file: apply re-derived them, so a
+    // file claiming them where the re-check finds neither is unverifiable.
+    if (r.code === 'NO_NEW_TEST') {
+      if (!noNewTest) suspect();
+      continue;
+    }
+    if (r.code === 'CI_RED') {
+      if (ci !== 'red') suspect();
+      continue;
+    }
+    fail(renderReason(r));
+  }
+  if (notes.length === 0) fail('proof was weak when the gate ran');
+  return { ok: false, weak: true, notes };
+}
 
 // The write half of the check/apply split (M2): land a verdict a read-only
 // gate job produced with `check --verdict-out`. This command never runs PR
@@ -124,7 +184,7 @@ export async function runApply(argv, deps = defaultDeps) {
   const baseSha = deps.git.mergeBase(root, baseTip, verdict.headSha);
   const claims = { title: pr.title, labels: pr.labels, subjects: pr.subjects };
   const issueLabels = issue ? deps.gh.issueLabels(prUrl, [issue]) : [];
-  const { kind, tamperNotes, holdNotes } = inspect({ root, baseSha, headSha: verdict.headSha, config, claims, issueLabels }, deps);
+  const { kind, files, tamperNotes, holdNotes } = inspect({ root, baseSha, headSha: verdict.headSha, config, claims, issueLabels }, deps);
 
   // A tamper note forces HUMAN with no proof, in the gate as here. A file that
   // says so agrees and lands normally (comment + label, nothing logged); one
@@ -147,7 +207,16 @@ export async function runApply(argv, deps = defaultDeps) {
   if (!verdict.proven) {
     proof =
       verdict.verdict === 'RETRY'
-        ? { ok: false, weak: true, notes: [{ ok: false, text: 'proof was weak when the gate ran' }] }
+        ? // MP-104: the file's weak-proof reasons are validated against what
+          // this job re-derived and rendered here, never posted as the file's
+          // own text. CI is re-read once for the two re-derived codes.
+          weakProofNotes({
+            reasons: verdict.reasons ?? [],
+            kind,
+            files,
+            config,
+            ci: deps.gh.getChecksStatus(prUrl, verdict.headSha),
+          })
         : { ok: false, weak: false, notes: [{ ok: false, text: 'proof did not hold when the gate ran' }] };
   } else {
     // The proof held; CI is the one part of it apply can re-check, so a MERGE
