@@ -1,6 +1,6 @@
 ---
 name: mergeproof-feature
-version: 2
+version: 3
 description: Use when you are the coding agent dispatched on a feature or enhancement issue in a repo gated by mergeproof and must land it as a pull request the gate can prove.
 ---
 
@@ -85,8 +85,13 @@ honest and the change small. Every rule in step 3 is tampering: instant
    - `RETRY` (exit 3): weak proof, fixable — suite red, a new test passes on
      base, or flaky. Fix exactly what the notes name, then rerun.
    - `HUMAN` (exit 4): a tamper note means undo whatever caused it; that run
-     is dead and cannot be revived. Any other `HUMAN` (untrusted kind, suite
-     already red on base) means hand off (step 9).
+     is dead and cannot be revived. Any other `HUMAN` is not yours to settle:
+     locally the gate also says it when the kind is not trusted yet, which
+     says nothing about your proof. If a note names a proof problem (suite
+     red, a new test passes on base, flaky), fix it as for `RETRY`. If the
+     only reason is the untrusted kind, carry on to step 6: the gate on the
+     pull request decides. Hand off (step 9) only for a real blocker, such as
+     a suite that is already red on base.
 3. Every fix round here counts toward the 3 rounds in step 6.
 
 ## 6. Critic pass
@@ -148,8 +153,10 @@ honest and the change small. Every rule in step 3 is tampering: instant
 
 ## 9. When stuck
 
-Stop and comment on the issue when: the criteria are ambiguous or untestable;
-the feature needs a dependency, an existing-test edit, or a diff over the
-limit; or all 3 rounds are spent without a clean gate. Say what you tried,
+Stop and comment on the issue only for a decision a human must make: the
+criteria are ambiguous or untestable; the feature needs a dependency, a secret
+or permission you lack, an existing-test edit, a protected path or a diff over
+the limit; or all 3 rounds are spent without a clean gate. A `HUMAN` from
+`check --local` for an untrusted kind is not a reason to stop. Say what you tried,
 what failed, and the verdicts. Push the branch if one exists. Never label
 anything — maintainers own labels — and never open a broken PR to show progress.
