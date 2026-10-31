@@ -85,6 +85,7 @@ Feature and bugfix changes get no count check: their base worktree carries the P
 | No kind fits the paths | `HUMAN` |
 | Proof is weak (CI red, new test passes on base, flaky, no new test) | `RETRY` |
 | Proof is impossible (suite already red on base) | `HUMAN` |
+| Touches a `paths.humanOnly` path (proof still runs, so a weak proof still gets `RETRY`) | `HUMAN` |
 | Kind not trusted for this agent and model | `HUMAN` |
 | Otherwise | `MERGE` |
 
