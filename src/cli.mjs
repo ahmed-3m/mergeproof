@@ -21,7 +21,7 @@ export const USAGE = `mergeproof v${VERSION} — let AI agents merge, only with 
 Usage:
   mergeproof check <pr-url> [--dry-run] [--json]   gate a pull request
   mergeproof check --local [--base <ref>] [--json] preflight HEAD against its base (agents run this)
-  mergeproof apply <verdict-file> --pr <pr-url> [--dry-run] [--json]  land a gate verdict (write job; runs no PR code)
+  mergeproof apply <verdict-file> --pr <pr-url> [--ledger <path>] [--events <file>] [--dry-run] [--json]  land a gate verdict (write job; runs no PR code)
   mergeproof sync [--dry-run] [--json]             settle the ledger and record reverts
   mergeproof roadmap [--file ROADMAP.md] [--limit <n>] [--proposer <login>] [--dry-run] [--json]   open proposed issues for ready ROADMAP.md items
   mergeproof retro [--ledger <path>] [--events <file>] [--min-n <n>] [--json]
