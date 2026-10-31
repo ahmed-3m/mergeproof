@@ -30,7 +30,7 @@ Usage:
   mergeproof dispatch <issue-number> --harness agy [--model <label>] [--vouch <digest>] [--dry-run]
                                                    run a local coding agent on an issue (maintainer machine; never the gate)
   mergeproof loop --harness <claude|gemini|agy> --model <label> --issue-file <path> --skill-file <path> --handoff <dir>
-                  [--base <ref>] [--rounds <n>] [--timeout-min <n>] [--retry] [--json]
+                  [--base <ref>] [--rounds <n>] [--timeout-min <n>] [--critic] [--critic-harness <name>] [--critic-model <label>] [--retry] [--json]
                                                    run a coding harness, then check --local, in rounds (agent container only; never the gate)
   mergeproof --version | --help
 
