@@ -27,6 +27,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - `check --json` (also with `--local`) reports `proven` (a proof ran and held) and `reasons` (the text of the failed proof notes, at most three), additive to the verdict JSON. The new `briefs/m3-self-loop.md` is the milestone-3 brief, and `SECURITY.md` documents the agent harness's subscription token and the `main` branch protection.
 
 ### Fixed
+- docs: the decision table in docs/architecture.md lists the `paths.humanOnly` rule, which decide.mjs checks after the proof and before trust.
 - `check --local` finds the base branch on a clone without `origin/HEAD`: `defaultBranch()` now also tries `origin/main`, `origin/master`, `main` and `master` in that order. Before, it stopped with "pass --base" in a checkout that had the remote branch but no default-branch pointer, as in the agent container.
 
 ### Fixed
