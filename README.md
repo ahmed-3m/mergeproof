@@ -107,8 +107,8 @@ Optional `.mergeproof.json` in the repo root. It is always read from the **base 
 | `mode` | `shadow` | `shadow` reports only; `enforce` merges on `MERGE`. |
 | `testCommand` | `npm test` | Runs the full suite. |
 | `testFileCommand` | `node --test` | Runs one test file. |
-| `agents.logins` | `[]` | Who counts as an agent. Empty means nothing is gated. |
-| `paths.humanOnly` | `[]` | Paths that always need a human, even for a trusted kind. |
+| `agents.logins` | none | Logins of your agent accounts. Until you add one, no PR is gated. |
+| `paths.humanOnly` | none | Paths that always need a human, even for a trusted kind. |
 | `trust.minOutcomes` | `10` | Settled outcomes a kind needs before it merges on its own. |
 
 Every key and default: [docs/architecture.md](docs/architecture.md#config-mergeproofjson).

@@ -29,6 +29,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 - docs: the README pipeline diagram centres each stage label in its card (the labels sat on the cards' left edges), and the hero's terminal card runs `check` on a PR URL, as the CLI requires, instead of a bare number.
+- docs: the README config table says "none" for the empty-list defaults of `agents.logins` and `paths.humanOnly` instead of `[]`, which read as a blank cell.
 
 ## [0.1.3] - 2026-10-30
 
