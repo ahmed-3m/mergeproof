@@ -878,7 +878,7 @@ jobs:
             # (a link or a claim of its own would reach the issue).
             case "$infra" in
               'authentication failed (401/403)' | 'usage or rate limit reached (429)' | 'model overloaded (529)' | 'model not found (404)' \
-                | 'the claude harness could not be started' | 'the gemini harness could not be started' | 'the agy harness could not be started' \
+                | 'the claude harness could not be started' | 'the gemini harness could not be started' | 'the agy harness could not be started' | 'the opencode harness could not be started' \
                 | 'the dependency install failed') ;;
               *) fail "infra-error.txt is not one of the reasons mergeproof loop writes" ;;
             esac

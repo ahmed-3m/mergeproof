@@ -21,6 +21,7 @@
   },
   "scripts": {
     "test": "node scripts/run-tests.mjs",
+    "test:fast": "node scripts/run-tests.mjs --fast",
     "demo": "node demo/build.mjs",
     "prepublishOnly": "npm test"
   },

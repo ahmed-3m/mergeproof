@@ -65,7 +65,7 @@ const CONTRACT = {
   'src/adapters/process.mjs': ['runProcess'],
   'src/adapters/git.mjs': ['changedFiles', 'changedPaths', 'diff', 'addedLines', 'addWorktree', 'removeWorktree', 'addBranchWorktree', 'refExists', 'commonDir', 'log', 'patchId', 'listFiles', 'grep'],
   'src/adapters/gh.mjs': ['getPullRequest', 'getChecksStatus', 'waitForChecks', 'issueLabels', 'squashMerge', 'comment', 'createIssue', 'listIssues', 'addLabel', 'repoView', 'createLabel', 'setVariable', 'setSecret', 'apiJson', 'branchExists', 'redactSecret', 'getIssue', 'issueComments', 'collaboratorPermission'],
-  'src/adapters/runner.mjs': ['runTests', 'parseTestCount'],
+  'src/adapters/runner.mjs': ['runTests', 'parseTestCount', 'cleanEnv'],
   'src/adapters/sandbox.mjs': ['TEST_USER', 'check', 'shareModules', 'makeHome', 'claim', 'wrap', 'killAll', 'release'],
 };
 

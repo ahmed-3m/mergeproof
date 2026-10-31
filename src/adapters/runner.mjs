@@ -21,10 +21,14 @@ const SUITE = '(suite)';
 // PR code runs here, so keep credentials out of its environment. NODE_TEST_CONTEXT
 // goes too: when mergeproof itself runs under `node --test`, an inherited value
 // turns a child `node --test` into a sub-reporter that exits 0 even on failure.
-const DROP_ENV = /TOKEN|SECRET|PASSWORD|API_KEY|PRIVATE_KEY|^NODE_TEST_CONTEXT$/i;
+// On GitHub Actions the step-control files (GITHUB_ENV, GITHUB_PATH, ...) are
+// worse than variables: a test that appends to one changes every later step of
+// the gate's own workflow, and the ACTIONS_* runtime values carry the runner's
+// tokens — so they all go as well.
+const DROP_ENV = /TOKEN|SECRET|PASSWORD|API_KEY|PRIVATE_KEY|^NODE_TEST_CONTEXT$|^GITHUB_(?:ENV|PATH|OUTPUT|STEP_SUMMARY|STATE)$|^ACTIONS_/i;
 
-function cleanEnv() {
-  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !DROP_ENV.test(k)));
+export function cleanEnv(sourceEnv = process.env) {
+  const env = Object.fromEntries(Object.entries(sourceEnv).filter(([k]) => !DROP_ENV.test(k)));
   // Ask runners for plain text: a colored summary would hide the case count
   // from parseTestCount and silently skip the dropped-test-count check.
   // FORCE_COLOR is set too because CI environments often set it, and it

@@ -33,6 +33,7 @@ export const HARNESSES = {
   claude: { bin: 'claude' },
   gemini: { bin: 'gemini' },
   agy: { bin: 'agy' },
+  opencode: { bin: 'opencode' },
 };
 
 // Handoff files the loop owns; the publish job reads exactly these names.
@@ -76,6 +77,9 @@ export function harnessArgv(harness, { model, prompt, addDirs = [] }) {
   }
   if (harness === 'gemini') {
     return { cmd: bin, args: ['-p', prompt, '-m', model, '--yolo', '-o', 'text', ...addDirs.flatMap((d) => ['--include-directories', d])] };
+  }
+  if (harness === 'opencode') {
+    return { cmd: bin, args: ['run', '--standalone', '--auto', '-m', model, prompt] };
   }
   return { cmd: bin, args: ['-p', prompt, '--model', model, '--dangerously-skip-permissions', '--output-format', 'text', ...addDirs.flatMap((d) => ['--add-dir', d])] };
 }
@@ -247,7 +251,10 @@ export async function runLoop(argv, deps = defaultDeps) {
     const started = deps.now();
     let res;
     try {
-      res = deps.run(cmd, args, { cwd, timeoutMs: timeoutMin * 60 * 1000 });
+      // opencode run reads piped stdin until EOF, which would outlive the
+      // round: an empty input gives it the EOF immediately. Every other
+      // harness gets the exact same options object as before.
+      res = deps.run(cmd, args, { cwd, timeoutMs: timeoutMin * 60 * 1000, ...(flags.harness === 'opencode' ? { input: '' } : {}) });
     } catch (err) {
       // The harness could not even start (not installed, not executable).
       writeFileSync(join(handoff, INFRA_FILE), `the ${flags.harness} harness could not be started\n`);
