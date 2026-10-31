@@ -37,7 +37,7 @@ export const defaultDeps = {
 // never the cwd, so `npx mergeproof init` reads the installed templates.
 const WORKFLOW_TEMPLATES_DIR = new URL('../../templates/workflows/', import.meta.url);
 const SKILLS_DIR = new URL('../../skills/', import.meta.url);
-const WORKFLOWS = ['mergeproof-pr.yml', 'mergeproof-issue.yml', 'mergeproof-sync.yml'];
+const WORKFLOWS = ['mergeproof-pr.yml', 'mergeproof-issue.yml', 'mergeproof-sync.yml', 'mergeproof-roadmap.yml'];
 const SKILLS = ['bugfix', 'feature'];
 const LEDGER_BRANCH = 'mergeproof-ledger';
 
@@ -239,7 +239,7 @@ function configText(detected) {
   return `${JSON.stringify(out, null, 2)}\n`;
 }
 
-function fillTemplate(text, { ciWorkflow, installCommand }) {
+export function fillTemplate(text, { ciWorkflow, installCommand }) {
   const filled = text.replaceAll('{{CI_WORKFLOW}}', ciWorkflow).replaceAll('{{INSTALL_COMMAND}}', installCommand);
   // `{{NAME}}` placeholders are uppercase with no spaces; GitHub's own
   // `${{ expr }}` (always a space after ${{) must survive untouched.

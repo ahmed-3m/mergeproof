@@ -1,13 +1,19 @@
 import { VERSION } from './version.mjs';
 import { EXIT_CODES } from './verdict.mjs';
 import { NotImplementedError, UsageError } from './errors.mjs';
-import { runCheck } from './commands/check.mjs';
-import { runApply } from './commands/apply.mjs';
-import { runSync } from './commands/sync.mjs';
-import { runInit } from './commands/init.mjs';
-import { runDispatch } from './commands/dispatch.mjs';
-
-const COMMANDS = { check: runCheck, apply: runApply, sync: runSync, init: runInit, dispatch: runDispatch };
+// Commands load on demand. The gate (check, apply, sync) must not even load
+// agent-side modules such as dispatch, so a bug or a dependency there can never
+// reach the code that judges a pull request; tests/structure.test.mjs pins the
+// import closure of the gate modules.
+const COMMANDS = {
+  check: () => import('./commands/check.mjs').then((m) => m.runCheck),
+  apply: () => import('./commands/apply.mjs').then((m) => m.runApply),
+  sync: () => import('./commands/sync.mjs').then((m) => m.runSync),
+  roadmap: () => import('./commands/roadmap.mjs').then((m) => m.runRoadmap),
+  init: () => import('./commands/init.mjs').then((m) => m.runInit),
+  dispatch: () => import('./commands/dispatch.mjs').then((m) => m.runDispatch),
+  loop: () => import('./commands/loop.mjs').then((m) => m.runLoop),
+};
 
 export const USAGE = `mergeproof v${VERSION} — let AI agents merge, only with proof
 
@@ -16,12 +22,16 @@ Usage:
   mergeproof check --local [--base <ref>] [--json] preflight HEAD against its base (agents run this)
   mergeproof apply <verdict-file> --pr <pr-url> [--dry-run] [--json]  land a gate verdict (write job; runs no PR code)
   mergeproof sync [--dry-run] [--json]             settle the ledger and record reverts
+  mergeproof roadmap [--file ROADMAP.md] [--limit <n>] [--proposer <login>] [--dry-run] [--json]   open proposed issues for ready ROADMAP.md items
   mergeproof init [--dry-run] [--yes] [--force] [--json]
                   [--agent <name>] [--model <name>] [--base-url <url>] [--bot-login <login>]
                   [--ci-workflow <name>] [--install-command <cmd>] [--test-command <cmd>]
                                                   install mergeproof into this repo (M2)
   mergeproof dispatch <issue-number> --harness agy [--model <label>] [--vouch <digest>] [--dry-run]
                                                    run a local coding agent on an issue (maintainer machine; never the gate)
+  mergeproof loop --harness <claude|gemini|agy> --model <label> --issue-file <path> --skill-file <path> --handoff <dir>
+                  [--base <ref>] [--rounds <n>] [--timeout-min <n>] [--retry] [--json]
+                                                   run a coding harness, then check --local, in rounds (agent container only; never the gate)
   mergeproof --version | --help
 
 Options:
@@ -33,7 +43,7 @@ Options:
   --test-user <name>              check: run the PR's tests as this unprivileged OS user (sudo; Linux/macOS)
   --ledger <path>                 default .mergeproof/ledger.json
   --ref <ref>                     sync: branch whose history is scanned (default HEAD)
-  --harness <name>                dispatch: local coding agent to run (phase 1: agy); its login comes from agents.identities on the base branch, and the identity account's PAT must be in the MERGEPROOF_DISPATCH_TOKEN environment variable
+  --harness <name>                dispatch: local coding agent to run (phase 1: agy); loop: claude, gemini or agy; its login comes from agents.identities on the base branch, and the identity account's PAT must be in the MERGEPROOF_DISPATCH_TOKEN environment variable
   --bot-login <login>             init: login of the machine user whose token opens agent PRs (required)
   --base-url <url>                init: Anthropic-compatible endpoint (defaulted for glm-* models)
   --ci-workflow <name>            init: workflow whose PR CI the gate waits for (auto-detected)
@@ -54,13 +64,13 @@ export async function main(argv) {
     return 0;
   }
 
-  const handler = COMMANDS[cmd];
-  if (!handler) {
+  if (!Object.hasOwn(COMMANDS, cmd)) {
     console.error(`mergeproof: unknown command "${cmd}"\n\n${USAGE}`);
     return EXIT_CODES.USAGE;
   }
 
   try {
+    const handler = await COMMANDS[cmd]();
     return await handler(rest);
   } catch (err) {
     if (err instanceof UsageError) {

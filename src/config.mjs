@@ -15,13 +15,24 @@ export function defaultConfig() {
     testCommand: 'npm test', // full suite; split on whitespace, no shell quoting
     testFileCommand: 'node --test', // runs one test file, appended as the last argument
     paths: {
-      tests: ['test/**', 'tests/**', '**/*.test.*', '**/*.spec.*'],
+      tests: ['test/**', 'tests/**', '**/*.test.*', '**/*.spec.*', '**/*_test.go', '**/test_*.py', '**/*_test.py'],
       // Files under a tests glob that are not tests themselves: never proven on their own.
-      testSupport: ['**/fixtures/**', '**/__fixtures__/**', '**/__snapshots__/**', '**/__mocks__/**', '**/helpers/**', '**/*.snap', '**/*.json'],
+      testSupport: ['**/fixtures/**', '**/__fixtures__/**', '**/__snapshots__/**', '**/__mocks__/**', '**/helpers/**', '**/*.snap', '**/*.json', '**/conftest.py', '**/__init__.py', '**/testdata/**'],
       docs: ['docs/**', '**/*.md'],
-      manifests: ['package.json', 'package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml'],
+      // Everything an install or build reads to resolve, fetch or run dependency
+      // code, including files that execute at install time (.pnpmfile.cjs,
+      // .yarn/ plugins) and toolchain pins: a change to any of them is deps.
+      manifests: [
+        'package.json', 'package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml',
+        '.npmrc', '.yarnrc', '.yarnrc.yml', '.yarn/**', '.pnpmfile.cjs', 'pnpm-workspace.yaml', 'bun.lock', 'bun.lockb', '.nvmrc', '.node-version', '.tool-versions',
+        '**/pyproject.toml', '**/setup.py', '**/setup.cfg', '**/*requirements*.txt', '**/requirements*.in', '**/requirements/**', '**/constraints*.txt',
+        '**/Pipfile', '**/Pipfile.lock', '**/poetry.lock', '**/uv.lock', '.python-version',
+        '**/go.mod', '**/go.sum', 'go.work', 'go.work.sum', '**/vendor/**',
+        '**/Cargo.toml', '**/Cargo.lock', 'rust-toolchain', 'rust-toolchain.toml', '**/.cargo/**',
+      ],
       // Instructions coding agents read on every run: an edit steers every later agent PR, so it is never docs.
       agentInstructions: ['AGENTS.md', 'AGENT.md', 'CLAUDE.md', 'CLAUDE.local.md', 'GEMINI.md', 'CONVENTIONS.md', '.cursorrules', '.windsurfrules', '.clinerules', '.roorules', '**/.clinerules/**', '**/.cursor/**', '**/.windsurf/**', '**/.claude/**', '**/.gemini/**', '**/.codex/**', '**/.agents/**', '**/.roo/**', '**/.junie/**', '**/.kiro/**', '.aider*', '.github/copilot-instructions.md'],
+      humanOnly: [], // paths whose change always needs a human, even when the kind is trusted (e.g. the gate's own rule files)
     },
     issueLabels: { bugfix: ['bug'] }, // maintainer labels on the linked issue that mark a bugfix
     limits: { maxDiffLines: 300, testTimeoutSec: 600, ciWaitSec: 600 }, // ciWaitSec: how long the gate waits for pending CI

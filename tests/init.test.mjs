@@ -253,7 +253,7 @@ test('CI workflow names and install commands that would break the YAML scalar ar
 
 // ---- local files ---------------------------------------------------------
 
-test('init --yes writes the six local files, fills the placeholders and round-trips the config', async () => {
+test('init --yes writes the seven local files, fills the placeholders and round-trips the config', async () => {
   const repo = makeRepo(BASE);
   try {
     const gh = fakeGh();
@@ -264,6 +264,7 @@ test('init --yes writes the six local files, fills the placeholders and round-tr
       '.github/workflows/mergeproof-pr.yml',
       '.github/workflows/mergeproof-issue.yml',
       '.github/workflows/mergeproof-sync.yml',
+      '.github/workflows/mergeproof-roadmap.yml',
       '.mergeproof/skills/bugfix/SKILL.md',
       '.mergeproof/skills/feature/SKILL.md',
     ]) {
@@ -301,7 +302,7 @@ test('re-running init is idempotent: every file unchanged', async () => {
     const out = [];
     assert.equal(await runInit(RUN, depsFor(repo, gh, out)), 0, out.join('\n'));
     const unchanged = out.join('\n').split('\n').filter((l) => /^\s+unchanged — /.test(l));
-    assert.equal(unchanged.length, 6, 'all six files unchanged');
+    assert.equal(unchanged.length, 7, 'all seven files unchanged');
     assert.ok(out.join('\n').split('\n').every((l) => !/^\s+created — |^\s+overwritten — /.test(l)), 'nothing written on the second run');
   } finally {
     repo.cleanup();
@@ -610,7 +611,7 @@ test('--json prints one object with repo, detected, files, remote and checks', a
     assert.equal(obj.repo, 'acme/app');
     assert.equal(obj.detected.installCommand, 'npm ci');
     assert.equal(obj.detected.ciWorkflow, 'CI');
-    assert.ok(obj.files.length === 6 && obj.remote.length > 0 && obj.checks.length > 0);
+    assert.ok(obj.files.length === 7 && obj.remote.length > 0 && obj.checks.length > 0);
     assert.ok(!out.join('\n').includes(BOT_TOKEN), 'no secret value in the JSON');
   } finally {
     repo.cleanup();

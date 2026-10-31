@@ -11,7 +11,7 @@ branding:
 
 inputs:
   command:
-    description: 'mergeproof command: check | apply | sync'
+    description: 'mergeproof command: check | apply | sync | roadmap'
     required: true
   args:
     description: 'Arguments for the command, space-separated. Passed through the environment and split without shell expansion.'
@@ -37,9 +37,9 @@ runs:
       run: |
         set -euo pipefail
         case "$MERGEPROOF_COMMAND" in
-          check | apply | sync) ;;
+          check | apply | sync | roadmap) ;;
           *)
-            echo "::error::command must be check, apply or sync (got: $MERGEPROOF_COMMAND)"
+            echo "::error::command must be check, apply, sync or roadmap (got: $MERGEPROOF_COMMAND)"
             exit 2
             ;;
         esac

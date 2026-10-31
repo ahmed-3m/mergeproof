@@ -124,7 +124,7 @@ export async function runApply(argv, deps = defaultDeps) {
   const baseSha = deps.git.mergeBase(root, baseTip, verdict.headSha);
   const claims = { title: pr.title, labels: pr.labels, subjects: pr.subjects };
   const issueLabels = issue ? deps.gh.issueLabels(prUrl, [issue]) : [];
-  const { kind, tamperNotes } = inspect({ root, baseSha, headSha: verdict.headSha, config, claims, issueLabels }, deps);
+  const { kind, tamperNotes, holdNotes } = inspect({ root, baseSha, headSha: verdict.headSha, config, claims, issueLabels }, deps);
 
   // A tamper note forces HUMAN with no proof, in the gate as here. A file that
   // says so agrees and lands normally (comment + label, nothing logged); one
@@ -168,7 +168,7 @@ export async function runApply(argv, deps = defaultDeps) {
   // Trust comes from this job's own ledger, under the workflow's flags.
   const ledger = readLedger(ledgerPath);
   const trust = kind ? trustFor(ledger, { kind, agent, model }, config.trust) : null;
-  const rederived = decide({ kind, tamperNotes, proof, trust });
+  const rederived = decide({ kind, tamperNotes, proof, trust, holdNotes });
 
   // apply may only lower a verdict (MERGE → RETRY on a CI that went red,
   // MERGE → HUMAN on CI still pending), never raise one: any other
