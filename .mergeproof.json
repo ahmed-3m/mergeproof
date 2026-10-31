@@ -30,6 +30,7 @@
       "skills/**"
     ],
     "humanOnly": [
+      ".mergeproof/lessons.md",
       "src/tamper.mjs",
       "src/decide.mjs",
       "src/prove.mjs",

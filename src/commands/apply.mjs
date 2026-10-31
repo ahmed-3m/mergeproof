@@ -8,6 +8,7 @@ import { decide } from '../decide.mjs';
 import { newTestFiles } from '../prove.mjs';
 import { REASON_CODES, REASON_PARAMS, renderReason } from '../reasons.mjs';
 import { DEFAULT_LEDGER, readLedger, trustFor, verifyLedger } from '../ledger.mjs';
+import { appendEvent } from '../events.mjs';
 import { EXIT_CODES, formatVerdict, makeVerdict } from '../verdict.mjs';
 import { readVerdictFile } from '../verdictfile.mjs';
 import { land } from '../land.mjs';
@@ -51,12 +52,22 @@ function verifiableReason(r, { newTests, config }) {
 // RETRY. A @1 file (no reasons) falls back to the generic weak note.
 function weakProofNotes({ reasons, kind, files, config, ci }) {
   const notes = [];
+  // The reason codes this job re-derived or validated (MP-107's event log):
+  // codes only, and only ones that held up against the re-derived world — a
+  // "suspect" reason's code never reaches the measurement.
+  const codes = [];
   const fail = (text) => notes.push({ ok: false, text });
   const suspect = () => fail(SUSPECT_NOTE);
   const newTests = newTestFiles(files, config);
   const noNewTest = (kind === 'feature' || kind === 'bugfix') && newTests.length === 0;
-  if (noNewTest) fail(renderReason({ code: 'NO_NEW_TEST' }));
-  if (ci === 'red') fail(renderReason({ code: 'CI_RED' }));
+  if (noNewTest) {
+    fail(renderReason({ code: 'NO_NEW_TEST' }));
+    codes.push('NO_NEW_TEST');
+  }
+  if (ci === 'red') {
+    fail(renderReason({ code: 'CI_RED' }));
+    codes.push('CI_RED');
+  }
   for (const r of reasons) {
     if (!verifiableReason(r, { newTests, config })) {
       suspect();
@@ -73,9 +84,10 @@ function weakProofNotes({ reasons, kind, files, config, ci }) {
       continue;
     }
     fail(renderReason(r));
+    codes.push(r.code);
   }
   if (notes.length === 0) fail('proof was weak when the gate ran');
-  return { ok: false, weak: true, notes };
+  return { ok: false, weak: true, notes, reasons: [...new Set(codes)] };
 }
 
 // The write half of the check/apply split (M2): land a verdict a read-only
@@ -85,7 +97,7 @@ function weakProofNotes({ reasons, kind, files, config, ci }) {
 // is re-derived here, because the file is written in the job that ran PR code
 // and every field in it is attacker-controlled.
 export async function runApply(argv, deps = defaultDeps) {
-  const { positionals, flags } = parseFlags(argv, ['dry-run', 'json'], ['pr', 'ledger', 'agent', 'model', 'skill', 'attempt', 'issue', 'head']);
+  const { positionals, flags } = parseFlags(argv, ['dry-run', 'json'], ['pr', 'ledger', 'events', 'agent', 'model', 'skill', 'attempt', 'issue', 'head']);
   if (positionals.length !== 1) throw new UsageError('expected exactly one <verdict-file>');
   // The PR comes from the workflow (the event that triggered it), never from the
   // file: a file naming another PR would borrow this PR's proof for that one.
@@ -226,7 +238,7 @@ export async function runApply(argv, deps = defaultDeps) {
     if (ci === 'pending') {
       ci = await gh.waitForChecks(prUrl, verdict.headSha, { timeoutSec: config.limits.ciWaitSec, sleep: deps.sleep, read: deps.gh.getChecksStatus });
     }
-    if (ci === 'red') proof = { ok: false, weak: true, notes: [{ ok: false, text: 'CI is red' }] };
+    if (ci === 'red') proof = { ok: false, weak: true, notes: [{ ok: false, text: 'CI is red' }], reasons: ['CI_RED'] };
     else if (ci === 'pending' || ci === 'moved') {
       ciUnfinished = true;
       proof = { ok: false, weak: false, notes: [{ ok: false, text: 'CI has not finished' }] };
@@ -245,6 +257,11 @@ export async function runApply(argv, deps = defaultDeps) {
     : ledger;
   const trust = kind ? trustFor(ledgerView, { kind, agent, model }, config.trust) : null;
   const rederived = decide({ kind, tamperNotes, proof, trust, holdNotes });
+
+  // The event log's reasons (MP-107): the codes this job re-derived or
+  // validated — never the file's raw list, so a forged reason's code can
+  // never reach the measurement.
+  const validatedReasonCodes = proof.reasons ?? [];
 
   // apply may only lower a verdict (MERGE → RETRY on a CI that went red,
   // MERGE → HUMAN on CI still pending), never raise one: any other
@@ -285,6 +302,33 @@ export async function runApply(argv, deps = defaultDeps) {
     { gh: deps.gh, now: deps.now },
   );
   if (final.verdict === 'HUMAN') deps.gh.addLabel(prUrl, HUMAN_LABEL);
+  // One event per landing (MP-107), appended only here: every refusal path
+  // above returns before this point, so nothing refused (benign or suspect)
+  // is ever measured. Tamper landings — the file agreed with the re-check —
+  // flow through land() like any other, so their event carries its rules.
+  // Every field is re-derived here or came from the workflow's flags, never
+  // from PR text, and the log is measurement only: trust still comes from
+  // the ledger alone (tests/events.test.mjs pins that).
+  if (flags.events !== null) {
+    appendEvent(resolve(root, flags.events), {
+      id: `${pr.number}:${verdict.headSha}:${attempts}`,
+      at: deps.now().toISOString(),
+      pr: pr.number,
+      issue,
+      kind,
+      agent,
+      model,
+      skill,
+      attempt: attempts,
+      verdict: final.verdict,
+      proven: proof.ok,
+      reasons: validatedReasonCodes,
+      tamperRules: tamperNotes.map((n) => n.rule).filter(Boolean),
+      held: holdNotes.length > 0,
+      mode: config.mode,
+      merged,
+    });
+  }
   deps.print(flags.json ? JSON.stringify({ ...final, mode: config.mode, merged }, null, 2) : text);
   return EXIT_CODES[final.verdict];
 }
