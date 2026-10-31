@@ -147,8 +147,11 @@ export const INFRA_REASONS = [
  * `harness` output → an infra failure label, or null. Only a run that failed
  * can be an infra failure (a successful answer that merely mentions "401"
  * is not one): a non-zero exit, claude's `is_error`, or agy's AGY_ERROR line.
+ * A run killed by the timeout never is: the harness was working, its output
+ * may quote anything, and check --local judges whatever it committed.
  */
-export function infraFailure(harness, { code, stdout = '', stderr = '' }) {
+export function infraFailure(harness, { code, stdout = '', stderr = '', timedOut = false }) {
+  if (timedOut) return null;
   let text = `${stdout}\n${stderr}`;
   let failed = code !== 0 || /AGY_ERROR/.test(text);
   if (harness === 'claude') {

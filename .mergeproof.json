@@ -38,6 +38,7 @@
       "templates/**",
       "benchmarks/**",
       "scripts/promote.mjs",
+      "scripts/run-tests.mjs",
       "SECURITY.md",
       "ROADMAP.md"
     ]

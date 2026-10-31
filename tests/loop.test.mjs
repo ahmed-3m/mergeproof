@@ -183,6 +183,9 @@ test('infraFailure names the cause only when the run failed', () => {
   assert.equal(infraFailure('gemini', { code: 0, stdout: 'handled the 429 case', stderr: '' }), null);
   // A failure with no known cause (the agent's own crash, a timeout) is judged by check, not as infra.
   assert.equal(infraFailure('claude', { code: 1, stdout: '', stderr: 'segfault' }), null);
+  // A timed-out run is not infra either, whatever its last output quotes.
+  assert.equal(infraFailure('gemini', { code: null, timedOut: true, stdout: 'the API returned 403 forbidden', stderr: 'quota' }), null);
+  assert.equal(infraFailure('claude', { code: null, timedOut: true, stdout: JSON.stringify({ is_error: true, result: 'usage limit reached' }), stderr: '' }), null);
 });
 
 test('an agent stop comment ends the rounds, and a proven change keeps it next to the title', async (t) => {
