@@ -387,18 +387,38 @@ jobs:
             fi
           done <<< "$comments"
 
-          # On a retry the gate's latest verdict — a github-actions[bot]
-          # comment on the pull request — belongs in the same file, so the
-          # agent reads the notes from it instead of following a URL. Only a
-          # body in the exact shape apply posts counts (anchored, not a
-          # substring another bot comment could quote).
+          # On a retry every gate verdict so far — github-actions[bot]
+          # comments on the pull request, oldest first — belongs in the same
+          # file, so the agent reads the earlier attempts' notes too instead
+          # of following a URL (MP-105). Only a body in the exact shape apply
+          # posts counts (anchored, not a substring another bot comment could
+          # quote). The comments API lists oldest-first, so the order here is
+          # chronological; the last entry is the latest verdict, and none at
+          # all fails closed.
           if [ -n "$PR_NUMBER" ]; then
-            verdict="$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" --paginate --jq '[.[] | select(.user.login == "github-actions[bot]") | select(.body | startswith("```\nMergeproof — "))][-1].body // empty | @base64' | tail -n 1 | base64 -d)"
-            if [ -z "$verdict" ]; then
+            verdicts_b64="$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" --paginate --jq '.[] | select(.user.login == "github-actions[bot]") | select(.body | startswith("```\nMergeproof — ")) | .body | @base64' || true)"
+            verdict_list=()
+            while read -r line; do
+              [ -n "$line" ] || continue
+              verdict_list+=("$line")
+            done <<< "$verdicts_b64"
+            if [ "${#verdict_list[@]}" -eq 0 ]; then
               echo "::error::could not find the gate's latest Mergeproof verdict comment on pull request #$PR_NUMBER — not starting the retry (fail closed)"
               exit 1
             fi
-            emit "Latest gate verdict on pull request #$PR_NUMBER — by github-actions[bot]" "$verdict"
+            count="${#verdict_list[@]}"
+            v_decoded="$(printf '%s' "${verdict_list[$((count - 1))]}" | base64 -d)"
+            if [ -z "$v_decoded" ]; then
+              echo "::error::could not find the gate's latest Mergeproof verdict comment on pull request #$PR_NUMBER — not starting the retry (fail closed)"
+              exit 1
+            fi
+            for ((idx = 0; idx < count - 1; idx++)); do
+              v_decoded="$(printf '%s' "${verdict_list[$idx]}" | base64 -d)"
+              [ -n "$v_decoded" ] || continue
+              emit "Prior gate verdict #$((idx + 1)) on pull request #$PR_NUMBER — by github-actions[bot]" "$v_decoded"
+            done
+            v_decoded="$(printf '%s' "${verdict_list[$((count - 1))]}" | base64 -d)"
+            emit "Latest gate verdict on pull request #$PR_NUMBER — by github-actions[bot]" "$v_decoded"
           fi
 
           echo "$omitted comment(s) by untrusted authors were omitted from this file." >> "$issue_file"
@@ -878,7 +898,7 @@ jobs:
             # (a link or a claim of its own would reach the issue).
             case "$infra" in
               'authentication failed (401/403)' | 'usage or rate limit reached (429)' | 'model overloaded (529)' | 'model not found (404)' \
-                | 'the claude harness could not be started' | 'the gemini harness could not be started' | 'the agy harness could not be started' \
+                | 'the claude harness could not be started' | 'the gemini harness could not be started' | 'the agy harness could not be started' | 'the opencode harness could not be started' \
                 | 'the dependency install failed') ;;
               *) fail "infra-error.txt is not one of the reasons mergeproof loop writes" ;;
             esac

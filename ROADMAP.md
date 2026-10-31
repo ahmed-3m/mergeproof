@@ -27,7 +27,7 @@ run opens nothing until the file is fixed.
 
 ### [MP-101] Add reason codes for weak proof
 - kind: feature
-- status: ready
+- status: done
 
 Weak-proof notes are free text today (`src/prove.mjs`), so a retry teaches the agent little and later phases cannot aggregate reasons. Create `src/reasons.mjs` exporting `REASON_CODES` and `renderReason` (pure, no I/O), with the codes from the M3 plan: `NO_NEW_TEST`, `NEW_TEST_PASSES_ON_BASE{path}`, `FLAKY_ON_BASE{path,n,m}`, `FAILS_ON_HEAD{path}`, `FLAKY_ON_HEAD`, `SUITE_RED_ON_HEAD`, `SUITE_RED_ON_BASE`, `CI_RED`, `REFACTOR_CHANGES_TESTS`.
 
@@ -38,7 +38,7 @@ Acceptance:
 
 ### [MP-102] Build prove notes through the reason codes
 - kind: refactor
-- status: ready
+- status: done
 
 `src/prove.mjs` builds its weak-proof notes as inline strings. Route them through `src/reasons.mjs` (MP-101) so every weak-proof note carries a code, without changing what the gate prints or decides.
 
@@ -49,7 +49,7 @@ Acceptance:
 
 ### [MP-103] Verdict file v2 carries reasons
 - kind: feature
-- status: ready
+- status: done
 
 The verdict file (`mergeproof-verdict@1`, `src/verdictfile.mjs`) has no field for why proof was weak, so the gate job cannot hand reasons to `apply`. Add schema `mergeproof-verdict@2` with a `reasons` array, and accept `@1` for one release so a gate job and an apply job on different versions still work.
 
@@ -60,7 +60,7 @@ Acceptance:
 
 ### [MP-104] apply re-derives and validates verdict-file reasons
 - kind: feature
-- status: ready
+- status: done
 
 `apply` trusts the verdict file for one fact (the proof held); reasons from the gate job must not become free text on the PR. Teach `src/commands/apply.mjs` to read the `@2` reasons: check each code against the enum, require `path` to be among the re-derived added test files and `n<m≤config.proof.*`, re-derive `NO_NEW_TEST` and `CI_RED` itself, and render the text itself.
 
@@ -71,7 +71,7 @@ Acceptance:
 
 ### [MP-105] RETRY carries every prior gate verdict, in order
 - kind: feature
-- status: ready
+- status: done
 
 On a retry the agent sees only the latest verdict comment, so earlier feedback is lost. The context step of the issue workflow (`templates/workflows/mergeproof-issue.yml`) builds the trusted issue file; make it include all prior anchored gate verdict comments on the PR, in order, not just the latest.
 
@@ -82,7 +82,7 @@ Acceptance:
 
 ### [MP-106] Critic rounds in the agent loop
 - kind: feature
-- status: ready
+- status: done
 
 `src/commands/loop.mjs` already runs up to `--rounds` (1-3) implementer passes, feeding the `check --local --json` reasons back when a change is not proven. Add a critic to each round: after `check --local`, a fresh harness invocation with Edit/Write disallowed reviews the diff against the issue and prints `CRITIC: PASS|FIX` plus at most 5 findings; FIX findings go into the next round's feedback. Stop when the change is proven and the critic says PASS, or when the rounds run out.
 
@@ -95,7 +95,7 @@ Acceptance:
 
 ### [MP-107] Events log for every landing
 - kind: feature
-- status: later
+- status: done
 
 The ledger records proven outcomes only, so nothing can be measured. Create `src/events.mjs` and an `apply --events <file>` flag that appends one record per landing to `events.jsonl` on the ledger branch: `{id, at, pr, issue, kind, agent, model, skill, attempt, verdict, proven, reasons, tamperRules, held, mode, merged}`, built from re-derived data only.
 
@@ -106,18 +106,18 @@ Acceptance:
 
 ### [MP-108] Union-merge the events log on push
 - kind: feature
-- status: later
+- status: ready
 
 Concurrent apply jobs each push `events.jsonl`; a plain rebase can drop or duplicate records. The ledger push step (`templates/workflows/mergeproof-pr.yml`) union-merges by `id` before pushing, the way outcomes are never doubled.
 
 Acceptance:
 - Two clones appending different records end with both on the remote, no duplicates by `id`.
 - A record already on the remote is never rewritten by a stale push.
-- `tests/workflows.test.mjs` runs the real push step against a bare remote, like the ledger-race test.
+- A new `tests/*.test.mjs` suite runs the real push step against a bare remote, like the ledger-race test (never an edit to an existing suite such as `tests/workflows.test.mjs` — an agent PR editing an existing test file is the `existingTestEdited` tamper rule).
 
 ### [MP-109] mergeproof retro
 - kind: feature
-- status: later
+- status: done
 
 Nothing summarizes how the agent is doing. Add `src/retro.mjs` (`summarize`) and `src/commands/retro.mjs` (`runRetro`): per (kind, agent, model, skill@version) over `events.jsonl` — runs, first-try proven rate, RETRY→proven rate, mean attempts, HUMAN reason histogram (humanOnly kept separate from tamper), merge rate, revert rate.
 
@@ -128,14 +128,14 @@ Acceptance:
 
 ### [MP-110] Nightly sync writes retro to the step summary
 - kind: feature
-- status: later
+- status: ready
 
 The retro table exists (MP-109) but nobody sees it. The nightly sync workflow (`templates/workflows/mergeproof-sync.yml`) runs `mergeproof retro` after settling and appends its output to `$GITHUB_STEP_SUMMARY`.
 
 Acceptance:
 - The sync workflow has a step running `mergeproof retro` that writes to `$GITHUB_STEP_SUMMARY`.
 - The step needs no new secret, and the workflow's permissions grow by nothing it does not already have.
-- `tests/workflows.test.mjs` covers the new step.
+- A new `tests/*.test.mjs` suite covers the new step (created, not an edit to `tests/workflows.test.mjs`: an agent PR editing an existing test file is the `existingTestEdited` tamper rule).
 
 ## Phase G — portability
 
@@ -196,7 +196,7 @@ Acceptance:
 
 ### [MP-116] Language-neutral skills v4, plus refactor and docs
 - kind: docs
-- status: later
+- status: done
 
 The bugfix/feature skills are Node-flavoured. Rewrite `skills/bugfix/SKILL.md` and `skills/feature/SKILL.md` language-neutral (v4) and add `skills/refactor/SKILL.md` and `skills/docs/SKILL.md` with the same frontmatter shape.
 
@@ -209,7 +209,7 @@ Acceptance:
 
 ### [MP-117] Lessons file as the persistent improvement harness
 - kind: feature
-- status: later
+- status: done
 
 `.mergeproof/lessons.md` is where agents pick up what past runs learned: they read it right after the skill. It is a gate file, so any edit to it is HUMAN — list it under `paths.humanOnly` in this repo's `.mergeproof.json`, and document the file for other repos.
 
@@ -227,7 +227,7 @@ The reflector proposes; the user merges. A `reflect-publish` job accepts an agen
 Acceptance:
 - The job refuses anything outside the allowlist, an unversioned skill change, an oversized lessons file, or a lesson whose cited PRs are missing from `events.jsonl` or share no reason code.
 - The evidence table is rendered by the job from retro JSON.
-- `tests/workflows.test.mjs` covers each refusal.
+- A new `tests/*.test.mjs` suite covers each refusal (created, not an edit to `tests/workflows.test.mjs`: an agent PR editing an existing test file is the `existingTestEdited` tamper rule).
 
 ### [MP-119] Weekly reflect workflow
 - kind: feature
@@ -238,7 +238,7 @@ A weekly `mergeproof-reflect.yml` closes the outer loop: a trusted job computes 
 Acceptance:
 - The workflow runs weekly (`schedule`) plus `workflow_dispatch`, behind the `MERGEPROOF_MODE` kill switch, with pinned actions and a timeout on every job.
 - The container that runs the reflector holds no GitHub credential; only the publish job pushes.
-- `tests/workflows.test.mjs` checks the triggers, the pins and the credential split.
+- A new `tests/*.test.mjs` suite checks the triggers, the pins and the credential split (created, not an edit to `tests/workflows.test.mjs`: an agent PR editing an existing test file is the `existingTestEdited` tamper rule).
 
 ### [MP-120] Skillbench
 - kind: feature
@@ -253,7 +253,7 @@ Acceptance:
 
 ### [MP-121] Pin the skill-copy promotion invariants
 - kind: refactor
-- status: later
+- status: done
 
 `.mergeproof/skills/<kind>` copies must never drift from `skills/<kind>`. Add `tests/skills.test.mjs`: the version of `.mergeproof/skills/<k>` must be ≤ that of `skills/<k>`; equal versions require identical bytes; only `scripts/promote.mjs` moves the copies.
 

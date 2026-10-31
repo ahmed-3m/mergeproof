@@ -1,3 +1,6 @@
+import { chmodSync, closeSync, constants, fstatSync, mkdtempSync, openSync, readdirSync, readSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { runProcess } from './process.mjs';
 import { wrap } from './sandbox.mjs';
 import { SAFE_PATH } from '../tamper.mjs';
@@ -21,10 +24,14 @@ const SUITE = '(suite)';
 // PR code runs here, so keep credentials out of its environment. NODE_TEST_CONTEXT
 // goes too: when mergeproof itself runs under `node --test`, an inherited value
 // turns a child `node --test` into a sub-reporter that exits 0 even on failure.
-const DROP_ENV = /TOKEN|SECRET|PASSWORD|API_KEY|PRIVATE_KEY|^NODE_TEST_CONTEXT$/i;
+// On GitHub Actions the step-control files (GITHUB_ENV, GITHUB_PATH, ...) are
+// worse than variables: a test that appends to one changes every later step of
+// the gate's own workflow, and the ACTIONS_* runtime values carry the runner's
+// tokens — so they all go as well.
+const DROP_ENV = /TOKEN|SECRET|PASSWORD|API_KEY|PRIVATE_KEY|^NODE_TEST_CONTEXT$|^GITHUB_(?:ENV|PATH|OUTPUT|STEP_SUMMARY|STATE)$|^ACTIONS_/i;
 
-function cleanEnv() {
-  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !DROP_ENV.test(k)));
+export function cleanEnv(sourceEnv = process.env) {
+  const env = Object.fromEntries(Object.entries(sourceEnv).filter(([k]) => !DROP_ENV.test(k)));
   // Ask runners for plain text: a colored summary would hide the case count
   // from parseTestCount and silently skip the dropped-test-count check.
   // FORCE_COLOR is set too because CI environments often set it, and it
@@ -35,10 +42,13 @@ function cleanEnv() {
 }
 
 // `testUser` ({ user, home }, from check --test-user) runs the command as that
-// unprivileged OS user through sudo; see sandbox.mjs.
-function run(cwd, command, extra, timeoutSec, testUser) {
+// unprivileged OS user through sudo; see sandbox.mjs. `covDir`, when set, is
+// handed to the child as NODE_V8_COVERAGE so a full-suite run leaves V8
+// coverage JSON behind for the diff-coverage proof (proof.minDiffCoverage).
+function run(cwd, command, extra, timeoutSec, testUser, covDir = null) {
   const [bin, ...args] = command.trim().split(/\s+/);
   const env = cleanEnv();
+  if (covDir) env.NODE_V8_COVERAGE = covDir;
   const argv = testUser ? wrap(testUser.user, testUser.home, bin, [...args, ...extra], env) : { bin, args: [...args, ...extra] };
   const res = runProcess(argv.bin, argv.args, {
     cwd,
@@ -93,18 +103,70 @@ export function parseTestCount(output) {
   return total;
 }
 
-/** @returns {{ passed: string[], failed: string[], count?: number|null }} */
-export function runTests(repoRoot, { testCommand, testFileCommand, only = null, timeoutSec = 600, testUser = null }) {
+/** @returns {{ passed: string[], failed: string[], count?: number|null, v8Coverage?: object[] }} */
+export function runTests(repoRoot, { testCommand, testFileCommand, only = null, timeoutSec = 600, testUser = null, collectCoverage = false }) {
   const passed = [];
   const failed = [];
   if (only === null) {
-    const { ok, output } = run(repoRoot, testCommand, [], timeoutSec, testUser);
-    (ok ? passed : failed).push(SUITE);
-    return { passed, failed, count: parseTestCount(output) };
+    // Full-suite runs can collect V8 coverage (NODE_V8_COVERAGE) for the
+    // diff-coverage proof. The dir is world-writable under --test-user so the
+    // test user's processes (node --test spawns one per file) can write to it,
+    // and it is removed once the JSON blobs are read back.
+    let covDir = null;
+    try {
+      if (collectCoverage) {
+        covDir = mkdtempSync(join(tmpdir(), 'mp-v8cov-'));
+        if (testUser) chmodSync(covDir, 0o1777);
+      }
+      const { ok, output } = run(repoRoot, testCommand, [], timeoutSec, testUser, covDir);
+      (ok ? passed : failed).push(SUITE);
+      const result = { passed, failed, count: parseTestCount(output) };
+      if (covDir) result.v8Coverage = readV8Coverage(covDir);
+      return result;
+    } finally {
+      if (covDir) rmSync(covDir, { recursive: true, force: true });
+    }
   }
   for (const file of only) {
     if (!SAFE_PATH.test(file)) throw new Error(`refusing to run unsafe test path ${JSON.stringify(file)}`);
     (run(repoRoot, testFileCommand, [file], timeoutSec, testUser).ok ? passed : failed).push(file);
   }
   return { passed, failed };
+}
+
+const MAX_COV_FILE_BYTES = 32 * 1024 * 1024;
+const MAX_COV_TOTAL_BYTES = 128 * 1024 * 1024;
+const OPEN_COV_FLAGS = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
+
+// One parsed JSON blob per regular file the run left behind. Under --test-user
+// the directory is world-writable, so entries are opened with O_NOFOLLOW |
+// O_NONBLOCK, verified with fstatSync().isFile(), and capped in size so a
+// hostile test cannot plant a symlink, a blocking FIFO, or an OOM-sized blob.
+function readV8Coverage(dir) {
+  const blobs = [];
+  let totalBytes = 0;
+  for (const name of readdirSync(dir)) {
+    if (!name.endsWith('.json')) continue;
+    let fd = null;
+    try {
+      fd = openSync(join(dir, name), OPEN_COV_FLAGS);
+      const st = fstatSync(fd);
+      if (!st.isFile() || st.size <= 0 || st.size > MAX_COV_FILE_BYTES || totalBytes + st.size > MAX_COV_TOTAL_BYTES) continue;
+      const buf = Buffer.allocUnsafe(st.size);
+      const bytesRead = readSync(fd, buf, 0, st.size, 0);
+      totalBytes += bytesRead;
+      blobs.push(JSON.parse(buf.subarray(0, bytesRead).toString('utf8')));
+    } catch {
+      // a torn write, symlink, FIFO, or unreadable entry is not a coverage result
+    } finally {
+      if (fd !== null) {
+        try {
+          closeSync(fd);
+        } catch {
+          // ignore close errors
+        }
+      }
+    }
+  }
+  return blobs;
 }

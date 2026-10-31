@@ -42,7 +42,7 @@ export const defaultDeps = {
 export const HARNESS_BIN = 'agy';
 export const TOKEN_ENV = 'MERGEPROOF_DISPATCH_TOKEN';
 const BASE_REF = 'refs/mergeproof/dispatch-base';
-const IDENT_PART = /^[A-Za-z0-9._@/+-]{1,100}$/;
+const IDENT_PART = /^[A-Za-z0-9._@/+:#-]{1,100}$/;
 const TRUSTED_PERMISSIONS = new Set(['admin', 'maintain', 'write']);
 
 // The agent's environment carries exactly one credential: GH_TOKEN, the
@@ -140,7 +140,7 @@ export async function runDispatch(argv, deps = defaultDeps) {
   if (!flags.harness) throw new UsageError('dispatch requires --harness <name> (phase 1: agy)');
   if (flags.harness !== 'agy') throw new UsageError(`--harness ${flags.harness} is not supported yet (phase 1: agy only)`);
   if (flags.model !== null && !IDENT_PART.test(flags.model)) {
-    throw new UsageError('--model must be 1-100 characters of A-Za-z0-9._@/+-');
+    throw new UsageError('--model must be 1-100 characters of A-Za-z0-9._@/+:#-');
   }
 
   // 1. The repo and the base config, read the same way the gate reads it:

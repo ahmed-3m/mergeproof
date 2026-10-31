@@ -5,7 +5,10 @@ import { CONFIG_FILE, parseConfig } from '../config.mjs';
 import { notAnAgentPr, identityFor } from '../agents.mjs';
 import { inspect } from '../inspect.mjs';
 import { decide } from '../decide.mjs';
-import { DEFAULT_LEDGER, readLedger, trustFor } from '../ledger.mjs';
+import { newTestFiles } from '../prove.mjs';
+import { REASON_CODES, REASON_PARAMS, renderReason } from '../reasons.mjs';
+import { DEFAULT_LEDGER, readLedger, trustFor, verifyLedger } from '../ledger.mjs';
+import { appendEvent } from '../events.mjs';
 import { EXIT_CODES, formatVerdict, makeVerdict } from '../verdict.mjs';
 import { readVerdictFile } from '../verdictfile.mjs';
 import { land } from '../land.mjs';
@@ -18,6 +21,81 @@ export const defaultDeps = { git, gh, now: () => new Date(), sleep: (ms) => new 
 // nothing extra, the workflow counts retries itself.
 export const HUMAN_LABEL = 'needs-human';
 
+// MP-104: the text of a reason the file claims but this job cannot verify.
+// Never the file's own words, never a different verdict — the reason renders
+// "suspect" and changes nothing else.
+const SUSPECT_NOTE = 'gate reported an unverifiable reason (suspect)';
+
+// Can one file reason be true in the world this job re-derived? A known code
+// with exactly the parameters it takes, a path among the re-derived added
+// test files, and run counts/percentages that fit the config. Shape was
+// already checked by readVerdictFile; this is the semantics.
+function verifiableReason(r, { newTests, config }) {
+  if (typeof r !== 'object' || !REASON_CODES.includes(r.code)) return false;
+  if (r.code === 'SUITE_RED_ON_BASE' || r.code === 'REFACTOR_CHANGES_TESTS') return false;
+  const params = REASON_PARAMS[r.code] ?? [];
+  const keys = Object.keys(r).filter((k) => k !== 'code');
+  if (keys.some((k) => !params.includes(k))) return false;
+  for (const p of params) if (r[p] === undefined) return false;
+  if (params.includes('path') && !newTests.includes(r.path)) return false;
+  if (r.code === 'FLAKY_ON_BASE' && !(Number.isInteger(r.n) && r.n > 0 && r.n < r.m && r.m === config.proof.baseFailRuns)) return false;
+  if (r.code === 'FLAKY_ON_HEAD' && !(Number.isInteger(r.n) && r.n > 0 && r.n < r.m && r.m === config.proof.headPassRuns)) return false;
+  if (r.code === 'DIFF_UNCOVERED') {
+    const wantMinPct = Math.round((config.proof.minDiffCoverage ?? 0) * 100);
+    if (!(wantMinPct > 0 && Number.isInteger(r.pct) && r.pct >= 0 && r.pct < wantMinPct && r.minPct === wantMinPct)) return false;
+  }
+  return true;
+}
+
+// The weak-proof notes for a RETRY verdict file, built from what this job
+// re-derived — never from the file's text (MP-104). NO_NEW_TEST and CI_RED
+// are re-derived outright; every other reason the file carries is validated
+// against the re-derived world and rendered here. A reason that fails the
+// re-check renders "suspect" and changes nothing else, and none of this ever
+// reaches decide(): the proof stays weak either way, so the verdict stays
+// RETRY. A @1 file (no reasons) falls back to the generic weak note.
+function weakProofNotes({ reasons, kind, files, config, ci }) {
+  const notes = [];
+  // The reason codes this job re-derived or validated (MP-107's event log):
+  // codes only, and only ones that held up against the re-derived world — a
+  // "suspect" reason's code never reaches the measurement.
+  const codes = [];
+  const fail = (text) => {
+    if (!notes.some((n) => n.text === text)) notes.push({ ok: false, text });
+  };
+  const suspect = () => fail(SUSPECT_NOTE);
+  const newTests = newTestFiles(files, config);
+  const noNewTest = (kind === 'feature' || kind === 'bugfix') && newTests.length === 0;
+  if (noNewTest) {
+    fail(renderReason({ code: 'NO_NEW_TEST' }));
+    codes.push('NO_NEW_TEST');
+  }
+  if (ci === 'red') {
+    fail(renderReason({ code: 'CI_RED' }));
+    codes.push('CI_RED');
+  }
+  for (const r of reasons) {
+    if (!verifiableReason(r, { newTests, config })) {
+      suspect();
+      continue;
+    }
+    // These two are never trusted from the file: apply re-derived them, so a
+    // file claiming them where the re-check finds neither is unverifiable.
+    if (r.code === 'NO_NEW_TEST') {
+      if (!noNewTest) suspect();
+      continue;
+    }
+    if (r.code === 'CI_RED') {
+      if (ci !== 'red') suspect();
+      continue;
+    }
+    fail(renderReason(r));
+    codes.push(r.code);
+  }
+  if (notes.length === 0) fail('proof was weak when the gate ran');
+  return { ok: false, weak: true, notes, reasons: [...new Set(codes)] };
+}
+
 // The write half of the check/apply split (M2): land a verdict a read-only
 // gate job produced with `check --verdict-out`. This command never runs PR
 // code, so it cannot re-prove the change — the file is trusted for that one
@@ -25,7 +103,7 @@ export const HUMAN_LABEL = 'needs-human';
 // is re-derived here, because the file is written in the job that ran PR code
 // and every field in it is attacker-controlled.
 export async function runApply(argv, deps = defaultDeps) {
-  const { positionals, flags } = parseFlags(argv, ['dry-run', 'json'], ['pr', 'ledger', 'agent', 'model', 'skill', 'attempt', 'issue', 'head']);
+  const { positionals, flags } = parseFlags(argv, ['dry-run', 'json'], ['pr', 'ledger', 'events', 'agent', 'model', 'skill', 'attempt', 'issue', 'head']);
   if (positionals.length !== 1) throw new UsageError('expected exactly one <verdict-file>');
   // The PR comes from the workflow (the event that triggered it), never from the
   // file: a file naming another PR would borrow this PR's proof for that one.
@@ -124,7 +202,7 @@ export async function runApply(argv, deps = defaultDeps) {
   const baseSha = deps.git.mergeBase(root, baseTip, verdict.headSha);
   const claims = { title: pr.title, labels: pr.labels, subjects: pr.subjects };
   const issueLabels = issue ? deps.gh.issueLabels(prUrl, [issue]) : [];
-  const { kind, tamperNotes, holdNotes } = inspect({ root, baseSha, headSha: verdict.headSha, config, claims, issueLabels }, deps);
+  const { kind, files, tamperNotes, holdNotes } = inspect({ root, baseSha, headSha: verdict.headSha, config, claims, issueLabels }, deps);
 
   // A tamper note forces HUMAN with no proof, in the gate as here. A file that
   // says so agrees and lands normally (comment + label, nothing logged); one
@@ -147,7 +225,16 @@ export async function runApply(argv, deps = defaultDeps) {
   if (!verdict.proven) {
     proof =
       verdict.verdict === 'RETRY'
-        ? { ok: false, weak: true, notes: [{ ok: false, text: 'proof was weak when the gate ran' }] }
+        ? // MP-104: the file's weak-proof reasons are validated against what
+          // this job re-derived and rendered here, never posted as the file's
+          // own text. CI is re-read once for the two re-derived codes.
+          weakProofNotes({
+            reasons: verdict.reasons ?? [],
+            kind,
+            files,
+            config,
+            ci: deps.gh.getChecksStatus(prUrl, verdict.headSha),
+          })
         : { ok: false, weak: false, notes: [{ ok: false, text: 'proof did not hold when the gate ran' }] };
   } else {
     // The proof held; CI is the one part of it apply can re-check, so a MERGE
@@ -157,7 +244,7 @@ export async function runApply(argv, deps = defaultDeps) {
     if (ci === 'pending') {
       ci = await gh.waitForChecks(prUrl, verdict.headSha, { timeoutSec: config.limits.ciWaitSec, sleep: deps.sleep, read: deps.gh.getChecksStatus });
     }
-    if (ci === 'red') proof = { ok: false, weak: true, notes: [{ ok: false, text: 'CI is red' }] };
+    if (ci === 'red') proof = { ok: false, weak: true, notes: [{ ok: false, text: 'CI is red' }], reasons: ['CI_RED'] };
     else if (ci === 'pending' || ci === 'moved') {
       ciUnfinished = true;
       proof = { ok: false, weak: false, notes: [{ ok: false, text: 'CI has not finished' }] };
@@ -165,10 +252,22 @@ export async function runApply(argv, deps = defaultDeps) {
     else proof = { ok: true, weak: false, notes: [] };
   }
 
-  // Trust comes from this job's own ledger, under the workflow's flags.
+  // Trust comes from this job's own ledger, under the workflow's flags. With
+  // trust.verifyCommits it is first anchored in git history (verifyLedger):
+  // a clean/pending outcome counts only when its mergeCommit is an ancestor
+  // of the fetched base tip, the same snapshot the gate job gated against.
+  // Reverts always survive; the ledger on disk is never rewritten by this.
   const ledger = readLedger(ledgerPath);
-  const trust = kind ? trustFor(ledger, { kind, agent, model }, config.trust) : null;
+  const ledgerView = config.trust.verifyCommits
+    ? verifyLedger(ledger, (o) => deps.git.isAncestor(root, o.mergeCommit, baseTip))
+    : ledger;
+  const trust = kind ? trustFor(ledgerView, { kind, agent, model }, config.trust) : null;
   const rederived = decide({ kind, tamperNotes, proof, trust, holdNotes });
+
+  // The event log's reasons (MP-107): the codes this job re-derived or
+  // validated — never the file's raw list, so a forged reason's code can
+  // never reach the measurement.
+  const validatedReasonCodes = proof.reasons ?? [];
 
   // apply may only lower a verdict (MERGE → RETRY on a CI that went red,
   // MERGE → HUMAN on CI still pending), never raise one: any other
@@ -209,6 +308,33 @@ export async function runApply(argv, deps = defaultDeps) {
     { gh: deps.gh, now: deps.now },
   );
   if (final.verdict === 'HUMAN') deps.gh.addLabel(prUrl, HUMAN_LABEL);
+  // One event per landing (MP-107), appended only here: every refusal path
+  // above returns before this point, so nothing refused (benign or suspect)
+  // is ever measured. Tamper landings — the file agreed with the re-check —
+  // flow through land() like any other, so their event carries its rules.
+  // Every field is re-derived here or came from the workflow's flags, never
+  // from PR text, and the log is measurement only: trust still comes from
+  // the ledger alone (tests/events.test.mjs pins that).
+  if (flags.events !== null) {
+    appendEvent(resolve(root, flags.events), {
+      id: `${pr.number}:${verdict.headSha}:${attempts}`,
+      at: deps.now().toISOString(),
+      pr: pr.number,
+      issue,
+      kind,
+      agent,
+      model,
+      skill,
+      attempt: attempts,
+      verdict: final.verdict,
+      proven: proof.ok,
+      reasons: validatedReasonCodes,
+      tamperRules: tamperNotes.map((n) => n.rule).filter(Boolean),
+      held: holdNotes.length > 0,
+      mode: config.mode,
+      merged,
+    });
+  }
   deps.print(flags.json ? JSON.stringify({ ...final, mode: config.mode, merged }, null, 2) : text);
   return EXIT_CODES[final.verdict];
 }

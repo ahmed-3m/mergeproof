@@ -36,8 +36,8 @@ export function defaultConfig() {
     },
     issueLabels: { bugfix: ['bug'] }, // maintainer labels on the linked issue that mark a bugfix
     limits: { maxDiffLines: 300, testTimeoutSec: 600, ciWaitSec: 600 }, // ciWaitSec: how long the gate waits for pending CI
-    proof: { baseFailRuns: 2, headPassRuns: 3, headReruns: 1 },
-    trust: { minOutcomes: 10, minCleanRate: 0.9, revertWindowDays: 14 },
+    proof: { baseFailRuns: 2, headPassRuns: 3, headReruns: 1, minDiffCoverage: 0 },
+    trust: { minOutcomes: 10, minCleanRate: 0.9, revertWindowDays: 14, verifyCommits: false },
     agents: { logins: [], branchPrefixes: ['agent/'], identities: {} },
     quarantine: [], // flaky test files excluded from proof runs
   };
@@ -51,6 +51,7 @@ const RANGES = {
   'proof.baseFailRuns': [1, 10, true],
   'proof.headPassRuns': [1, 10, true],
   'proof.headReruns': [0, 5, true],
+  'proof.minDiffCoverage': [0, 1, false],
   'trust.minOutcomes': [1, 1000, true],
   'trust.minCleanRate': [0, 1, false],
   'trust.revertWindowDays': [1, 365, true],
@@ -65,7 +66,7 @@ function typeOf(v) {
 // A login → trust-bucket part (an `agent` or `model` name): machine-shaped and
 // bounded, because these strings flow into verdict files, comments and the
 // ledger, and a login with an identity is exactly as privileged as the flags.
-const IDENT_PART = /^[A-Za-z0-9._@/+-]{1,100}$/;
+const IDENT_PART = /^[A-Za-z0-9._@/+:#-]{1,100}$/;
 const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(?:\[bot\])?$/;
 
 /**
@@ -90,7 +91,7 @@ function validateIdentities(value, path, fail) {
     }
     for (const part of ['agent', 'model']) {
       if (typeof identity[part] !== 'string' || !IDENT_PART.test(identity[part])) {
-        fail(`"${at}.${part}" must be 1-100 characters of A-Za-z0-9._@/+-`);
+        fail(`"${at}.${part}" must be 1-100 characters of A-Za-z0-9._@/+:#-`);
       }
     }
     out[login] = { agent: identity.agent, model: identity.model };

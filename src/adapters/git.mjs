@@ -49,6 +49,17 @@ export function mergeBase(repoRoot, a, b) {
 }
 
 /**
+ * Is `commit` an ancestor of (or equal to) `ancestorOf`? Used to anchor
+ * ledger outcomes in real git history (trust.verifyCommits). Unknown or
+ * malformed SHAs are simply false, never an error, so a forged ledger entry
+ * cannot break the gate.
+ */
+export function isAncestor(repoRoot, commit, ancestorOf) {
+  if (typeof commit !== 'string' || !/^[0-9a-f]{7,40}$/.test(commit)) return false;
+  return git(repoRoot, ['merge-base', '--is-ancestor', commit, ancestorOf], { allowFail: true }).code === 0;
+}
+
+/**
  * origin's default branch if known, else the first of origin/main, origin/master,
  * main, master that exists. Remote refs come first because they track the
  * fetched tip; a clone without origin/HEAD (a shallow or single-branch fetch,

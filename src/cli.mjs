@@ -10,6 +10,7 @@ const COMMANDS = {
   apply: () => import('./commands/apply.mjs').then((m) => m.runApply),
   sync: () => import('./commands/sync.mjs').then((m) => m.runSync),
   roadmap: () => import('./commands/roadmap.mjs').then((m) => m.runRoadmap),
+  retro: () => import('./commands/retro.mjs').then((m) => m.runRetro),
   init: () => import('./commands/init.mjs').then((m) => m.runInit),
   dispatch: () => import('./commands/dispatch.mjs').then((m) => m.runDispatch),
   loop: () => import('./commands/loop.mjs').then((m) => m.runLoop),
@@ -23,14 +24,16 @@ Usage:
   mergeproof apply <verdict-file> --pr <pr-url> [--dry-run] [--json]  land a gate verdict (write job; runs no PR code)
   mergeproof sync [--dry-run] [--json]             settle the ledger and record reverts
   mergeproof roadmap [--file ROADMAP.md] [--limit <n>] [--proposer <login>] [--dry-run] [--json]   open proposed issues for ready ROADMAP.md items
+  mergeproof retro [--ledger <path>] [--events <file>] [--min-n <n>] [--json]
+                                                   summarize agent performance from events.jsonl (read-only)
   mergeproof init [--dry-run] [--yes] [--force] [--json]
                   [--agent <name>] [--model <name>] [--base-url <url>] [--bot-login <login>]
                   [--ci-workflow <name>] [--install-command <cmd>] [--test-command <cmd>]
                                                   install mergeproof into this repo (M2)
   mergeproof dispatch <issue-number> --harness agy [--model <label>] [--vouch <digest>] [--dry-run]
                                                    run a local coding agent on an issue (maintainer machine; never the gate)
-  mergeproof loop --harness <claude|gemini|agy> --model <label> --issue-file <path> --skill-file <path> --handoff <dir>
-                  [--base <ref>] [--rounds <n>] [--timeout-min <n>] [--retry] [--json]
+  mergeproof loop --harness <claude|gemini|agy|opencode> --model <label> --issue-file <path> --skill-file <path> --handoff <dir>
+                  [--base <ref>] [--rounds <n>] [--timeout-min <n>] [--critic] [--critic-harness <name>] [--critic-model <label>] [--retry] [--json]
                                                    run a coding harness, then check --local, in rounds (agent container only; never the gate)
   mergeproof --version | --help
 
@@ -41,9 +44,9 @@ Options:
   --head <sha>                    check/apply: the head whose CI completed; a PR that moved since stands down for its own new run
   --verdict-out <file>            check: write the verdict for an apply job, write nothing to GitHub
   --test-user <name>              check: run the PR's tests as this unprivileged OS user (sudo; Linux/macOS)
-  --ledger <path>                 default .mergeproof/ledger.json
+  --ledger <path>                 default .mergeproof/ledger.json; retro also reads events.jsonl next to it
   --ref <ref>                     sync: branch whose history is scanned (default HEAD)
-  --harness <name>                dispatch: local coding agent to run (phase 1: agy); loop: claude, gemini or agy; its login comes from agents.identities on the base branch, and the identity account's PAT must be in the MERGEPROOF_DISPATCH_TOKEN environment variable
+  --harness <name>                dispatch: local coding agent to run (phase 1: agy); loop: claude, gemini, agy or opencode; its login comes from agents.identities on the base branch, and the identity account's PAT must be in the MERGEPROOF_DISPATCH_TOKEN environment variable
   --bot-login <login>             init: login of the machine user whose token opens agent PRs (required)
   --base-url <url>                init: Anthropic-compatible endpoint (defaulted for glm-* models)
   --ci-workflow <name>            init: workflow whose PR CI the gate waits for (auto-detected)

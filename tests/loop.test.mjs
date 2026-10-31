@@ -285,7 +285,7 @@ test('harnessArgv: gemini and agy mirror the isolated workflow runs', () => {
     args: ['-p', 'p', '--model', 'm3', '--dangerously-skip-permissions', '--output-format', 'text', '--add-dir', '/mergeproof'],
   });
   assert.deepEqual(harnessArgv('agy', { model: 'm3', prompt: 'p' }).args.slice(-3), ['--dangerously-skip-permissions', '--output-format', 'text'], 'no add-dirs, no add-dir flags');
-  assert.deepEqual(Object.fromEntries(Object.entries(HARNESSES).map(([k, v]) => [k, v.bin])), { claude: 'claude', gemini: 'gemini', agy: 'agy' });
+  assert.deepEqual(Object.fromEntries(Object.entries(HARNESSES).map(([k, v]) => [k, v.bin])), { claude: 'claude', gemini: 'gemini', agy: 'agy', opencode: 'opencode' });
   assert.throws(() => harnessArgv('codex', { model: 'm', prompt: 'p' }), /--harness must be one of/);
 });
 
@@ -330,7 +330,7 @@ test('runProcess stops a child that outlives timeoutMs and says so', () => {
 });
 
 test('the CLI knows loop and marks it agent-container-only in the usage', () => {
-  assert.match(USAGE, /mergeproof loop --harness <claude\|gemini\|agy>/);
+  assert.match(USAGE, /mergeproof loop --harness <claude\|gemini\|agy\|opencode>/);
   assert.match(USAGE, /agent container only; never the gate/);
   assert.equal(typeof main, 'function');
 });

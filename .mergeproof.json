@@ -1,5 +1,8 @@
 {
   "mode": "enforce",
+  "trust": {
+    "verifyCommits": true
+  },
   "paths": {
     "agentInstructions": [
       "AGENTS.md",
@@ -27,6 +30,7 @@
       "skills/**"
     ],
     "humanOnly": [
+      ".mergeproof/lessons.md",
       "src/tamper.mjs",
       "src/decide.mjs",
       "src/prove.mjs",
