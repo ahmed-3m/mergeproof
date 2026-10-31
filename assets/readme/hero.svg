@@ -31,12 +31,12 @@
     <circle cx="672" cy="80" r="5.5" fill="#d29922"/>
     <circle cx="694" cy="80" r="5.5" fill="#3fb950"/>
 
-    <text x="652" y="140"><tspan fill="#3fb950">$</tspan><tspan fill="#e6edf3">&#160;mergeproof check 131</tspan></text>
+    <text x="652" y="140"><tspan fill="#3fb950">$</tspan><tspan fill="#e6edf3">&#160;mergeproof check …/pull/131</tspan></text>
     <text x="652" y="178" fill="#8b949e"><tspan>&#160;&#160;--agent claude-code --model glm</tspan></text>
 
-    <text x="652" y="242"><tspan font-weight="700" fill="#f85149">Mergeproof — HUMAN</tspan><tspan fill="#e6edf3"> (kind: bugfix)</tspan></text>
-    <text x="652" y="280" fill="#e6edf3"><tspan fill="#f85149">&#160;&#160;✗</tspan> edits existing test</text>
-    <text x="652" y="318" fill="#8b949e"><tspan>&#160;&#160;&#160;&#160;tests/parser.test.js</tspan></text>
-    <text x="652" y="344" fill="#8b949e"><tspan>&#160;&#160;(shadow)</tspan></text>
+    <text x="652" y="236"><tspan font-weight="700" fill="#f85149">Mergeproof — HUMAN</tspan><tspan fill="#e6edf3"> (kind: bugfix)</tspan></text>
+    <text x="652" y="272" fill="#e6edf3"><tspan fill="#f85149">&#160;&#160;✗</tspan> edits existing test</text>
+    <text x="652" y="306" fill="#8b949e"><tspan>&#160;&#160;&#160;&#160;tests/parser.test.js</tspan></text>
+    <text x="652" y="340" fill="#8b949e"><tspan>&#160;&#160;(shadow)</tspan></text>
   </g>
 </svg>

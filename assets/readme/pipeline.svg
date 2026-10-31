@@ -14,27 +14,27 @@
   <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle">
     <g transform="translate(64 64)">
       <rect width="230" height="112" rx="12" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
-      <text y="42" font-size="24" font-weight="700" fill="#e6edf3">classify</text>
-      <text y="76" font-size="18" fill="#8b949e">kind from the</text>
-      <text y="100" font-size="18" fill="#8b949e">changed paths</text>
+      <text x="115" y="42" font-size="24" font-weight="700" fill="#e6edf3">classify</text>
+      <text x="115" y="76" font-size="18" fill="#8b949e">kind from the</text>
+      <text x="115" y="100" font-size="18" fill="#8b949e">changed paths</text>
     </g>
     <g transform="translate(336 64)">
       <rect width="230" height="112" rx="12" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
-      <text y="42" font-size="24" font-weight="700" fill="#e6edf3">tamper</text>
-      <text y="76" font-size="18" fill="#8b949e">test tampering</text>
-      <text y="100" font-size="18" fill="#8b949e">ends the run</text>
+      <text x="115" y="42" font-size="24" font-weight="700" fill="#e6edf3">tamper</text>
+      <text x="115" y="76" font-size="18" fill="#8b949e">test tampering</text>
+      <text x="115" y="100" font-size="18" fill="#8b949e">ends the run</text>
     </g>
     <g transform="translate(608 64)">
       <rect width="230" height="112" rx="12" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
-      <text y="42" font-size="24" font-weight="700" fill="#e6edf3">prove</text>
-      <text y="76" font-size="18" fill="#8b949e">proof runs in</text>
-      <text y="100" font-size="18" fill="#8b949e">fresh worktrees</text>
+      <text x="115" y="42" font-size="24" font-weight="700" fill="#e6edf3">prove</text>
+      <text x="115" y="76" font-size="18" fill="#8b949e">proof runs in</text>
+      <text x="115" y="100" font-size="18" fill="#8b949e">fresh worktrees</text>
     </g>
     <g transform="translate(880 64)">
       <rect width="230" height="112" rx="12" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
-      <text y="42" font-size="24" font-weight="700" fill="#e6edf3">decide</text>
-      <text y="76" font-size="18" fill="#8b949e">trust ledger</text>
-      <text y="100" font-size="18" fill="#8b949e">picks the verdict</text>
+      <text x="115" y="42" font-size="24" font-weight="700" fill="#e6edf3">decide</text>
+      <text x="115" y="76" font-size="18" fill="#8b949e">trust ledger</text>
+      <text x="115" y="100" font-size="18" fill="#8b949e">picks the verdict</text>
     </g>
   </g>
 
