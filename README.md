@@ -21,7 +21,7 @@ It uses plain, deterministic code. It never calls an LLM, so the agent being jud
 - **Kinds:** feature, bugfix, refactor, docs, deps. The kind comes from the changed paths only.
 - **Safe by default:** new installs run in `shadow` mode (report only, merge nothing).
 - **Trust is earned:** per kind, per agent and model, from past outcomes. A revert takes it away.
-- **Zero dependencies.** Node.js >= 18.17. MIT. Status: v0.1.3.
+- **Zero dependencies.** Node.js >= 18.17. MIT. Status: v0.2.0.
 
 ## How it works
 
