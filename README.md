@@ -113,7 +113,7 @@ Optional `.mergeproof.json` in the repo root. It is always read from the **base 
 
 Every key and default: [docs/architecture.md](docs/architecture.md#config-mergeproofjson).
 
-**Which PRs are gated:** the author must be in `agents.logins` **and** the branch must start with `agent/` (`agents.branchPrefixes`). Fork PRs always go to a human.
+**Which PRs are gated:** the author must be in `agents.logins` **and** the branch must start with one of `agents.branchPrefixes` (default `agent/`; an empty list turns this check off). Fork PRs always go to a human.
 
 ## Earning trust
 
