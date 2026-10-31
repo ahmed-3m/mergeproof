@@ -73,7 +73,7 @@ npx @ahmed-3m/mergeproof init --model <model> --bot-login <bot>
 Check one PR by hand:
 
 ```bash
-npx @ahmed-3m/mergeproof check https://github.com/you/repo/pull/42 --agent claude-code --model glm-5.2
+npx @ahmed-3m/mergeproof check https://github.com/you/repo/pull/42 --agent claude-code --model glm-5.2 --issue 17
 ```
 
 ```text
@@ -82,13 +82,13 @@ Mergeproof — HUMAN (kind: bugfix)
   (shadow)
 ```
 
-The output is one line plus at most three notes, failures first.
+The PR counts as a bugfix because issue 17 has the maintainer's `bug` label; without `--issue` it would be a feature. The output is one line plus at most three notes, failures first.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `check <pr-url>` | Gate a PR. In CI, add `--verdict-out <file>` so the read-only job writes nothing to GitHub. |
+| `check <pr-url>` | Gate a PR. In CI, add `--verdict-out <file>` so the read-only job writes nothing to GitHub. Never run it without that flag in a job that holds a write token. |
 | `check --local` | Preflight your branch. Agents run this before opening a PR. |
 | `apply <verdict-file> --pr <pr-url>` | Land a verdict: merge, comment, record the outcome. Runs no PR code. |
 | `sync` | Nightly: settle outcomes and record reverts. |
@@ -107,17 +107,17 @@ Optional `.mergeproof.json` in the repo root. It is always read from the **base 
 | `mode` | `shadow` | `shadow` reports only; `enforce` merges on `MERGE`. |
 | `testCommand` | `npm test` | Runs the full suite. |
 | `testFileCommand` | `node --test` | Runs one test file. |
-| `agents.logins` | `[]` | Who counts as an agent. Empty means nothing is gated. |
-| `paths.humanOnly` | `[]` | Paths that always need a human, even for a trusted kind. |
+| `agents.logins` | none | Logins of your agent accounts. Until you add one, no PR is gated. |
+| `paths.humanOnly` | none | Paths that always need a human, even for a trusted kind. |
 | `trust.minOutcomes` | `10` | Settled outcomes a kind needs before it merges on its own. |
 
 Every key and default: [docs/architecture.md](docs/architecture.md#config-mergeproofjson).
 
-**Which PRs are gated:** the author must be in `agents.logins` **and** the branch must start with `agent/`. Fork PRs always go to a human.
+**Which PRs are gated:** the author must be in `agents.logins` **and** the branch must start with one of `agents.branchPrefixes` (default `agent/`; an empty list turns this check off). Fork PRs always go to a human.
 
 ## Earning trust
 
-A kind merges on its own only after 10 settled outcomes, at least 90% clean, with no recent revert. Human merges count, so a new install earns trust like this:
+A kind merges on its own only after 10 settled outcomes, at least 90% clean, with no recent revert. Human merges of PRs whose proof held count too, so a new install earns trust like this:
 
 1. Run in `shadow` mode and let the agent open PRs.
 2. Merge the good ones yourself.
@@ -139,7 +139,7 @@ Use the action `ahmed-3m/mergeproof@v1` ([action.yml](action.yml)). Inputs: `com
 | `mergeproof-sync.yml` | Nightly ledger sync. |
 | `mergeproof-roadmap.yml` | When `ROADMAP.md` changes: opens proposed issues for its `ready` items. |
 
-- **Coding agent:** `MERGEPROOF_HARNESS` picks `claude` (default), `gemini` or `agy`. Each runs in a credential-free container; a separate job checks its output before anything is pushed.
+- **Coding agent:** `MERGEPROOF_HARNESS` picks `claude` (default), `gemini` or `agy`. Each runs in a container with no GitHub credential; a separate job checks its output before anything is pushed.
 - **Gate job:** runs the PR's tests with no secrets and a read-only token. Only the apply job can write.
 
 Variables, secrets and harness caveats: [templates/README.md](templates/README.md). Job permissions: [SECURITY.md](SECURITY.md#workflow-permissions).
@@ -168,7 +168,7 @@ npm run demo   # see demo/README.md
 | [benchmarks/specs.md](benchmarks/specs.md) | Pre-registered gate scenarios |
 | [docs/releasing.md](docs/releasing.md), [CHANGELOG.md](CHANGELOG.md) | Releases |
 
-Planned for v2: a GitHub App, a hosted dashboard and org policies.
+Out of scope for v1, planned for v2: a GitHub App, a hosted service and a dashboard.
 
 ## License
 
