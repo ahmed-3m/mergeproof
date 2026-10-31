@@ -74,6 +74,28 @@ export function appendOutcome(ledger, outcome) {
 }
 
 /**
+ * A filtered view of `ledger` in which every outcome that could grant or
+ * remove trust is anchored in real git history: `clean` and `pending`
+ * outcomes are kept only when they name a mergeCommit (≥ 7 hex chars) that
+ * `isVerifiedMerge(outcome)` confirms — the caller anchors it in the gated
+ * base branch with git, so a forged `mergeproof-ledger` entry (or one whose
+ * commit a rebase dropped) buys no trust. `reverted` outcomes are ALWAYS
+ * kept: a penalty can never be erased, whatever happened to its SHA. `open`
+ * and `closed` outcomes never grant trust in `trustFor` and pass through.
+ * The input ledger is not mutated; the view is what `trustFor` reads.
+ * @param {object} ledger
+ * @param {(outcome: object) => boolean} isVerifiedMerge
+ * @returns {object} a ledger with the unverified outcomes removed.
+ */
+export function verifyLedger(ledger, isVerifiedMerge) {
+  const outcomes = ledger.outcomes.filter((o) => {
+    if (o.status !== 'clean' && o.status !== 'pending') return true;
+    return typeof o.mergeCommit === 'string' && o.mergeCommit.length >= 7 && isVerifiedMerge(o);
+  });
+  return { ...ledger, outcomes };
+}
+
+/**
  * Trust is earned per (kind, agent, model): unlocked after trust.minOutcomes
  * merged outcomes at ≥ trust.minCleanRate clean; lost after any revert in the
  * last trust.minOutcomes merges. Pending merges count toward neither until

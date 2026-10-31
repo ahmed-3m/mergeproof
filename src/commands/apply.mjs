@@ -7,7 +7,7 @@ import { inspect } from '../inspect.mjs';
 import { decide } from '../decide.mjs';
 import { newTestFiles } from '../prove.mjs';
 import { REASON_CODES, REASON_PARAMS, renderReason } from '../reasons.mjs';
-import { DEFAULT_LEDGER, readLedger, trustFor } from '../ledger.mjs';
+import { DEFAULT_LEDGER, readLedger, trustFor, verifyLedger } from '../ledger.mjs';
 import { EXIT_CODES, formatVerdict, makeVerdict } from '../verdict.mjs';
 import { readVerdictFile } from '../verdictfile.mjs';
 import { land } from '../land.mjs';
@@ -234,9 +234,16 @@ export async function runApply(argv, deps = defaultDeps) {
     else proof = { ok: true, weak: false, notes: [] };
   }
 
-  // Trust comes from this job's own ledger, under the workflow's flags.
+  // Trust comes from this job's own ledger, under the workflow's flags. With
+  // trust.verifyCommits it is first anchored in git history (verifyLedger):
+  // a clean/pending outcome counts only when its mergeCommit is an ancestor
+  // of the fetched base tip, the same snapshot the gate job gated against.
+  // Reverts always survive; the ledger on disk is never rewritten by this.
   const ledger = readLedger(ledgerPath);
-  const trust = kind ? trustFor(ledger, { kind, agent, model }, config.trust) : null;
+  const ledgerView = config.trust.verifyCommits
+    ? verifyLedger(ledger, (o) => deps.git.isAncestor(root, o.mergeCommit, baseTip))
+    : ledger;
+  const trust = kind ? trustFor(ledgerView, { kind, agent, model }, config.trust) : null;
   const rederived = decide({ kind, tamperNotes, proof, trust, holdNotes });
 
   // apply may only lower a verdict (MERGE → RETRY on a CI that went red,

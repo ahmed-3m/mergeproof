@@ -23,9 +23,12 @@ import { renderReason } from './reasons.mjs';
 //   files: [{ path, status }], config,
 //   ci: 'green' | 'red' | 'pending' | 'none' | null,
 //   runBase(files | null) => { passed: string[], failed: string[], count?: number|null },  null = full suite
-//   runHead(files | null) => { passed: string[], failed: string[], count?: number|null },
+//   runHead(files | null) => { passed: string[], failed: string[], count?: number|null, coverageRatio?: number },
 // }                                                                          count: full-suite runs only,
-//                                                                           null/absent when the output doesn't parse
+//                                                                           null/absent when the output doesn't parse;
+//                                                                           coverageRatio: head full-suite runs only,
+//                                                                           present when proof.minDiffCoverage > 0 and
+//                                                                           the runner produced V8 coverage
 // Result: ok (proof holds), weak (the agent can fix it: RETRY), or neither
 // (the gate can't prove anything, e.g. the suite is already red on base: HUMAN).
 // tamperNotes is what the proof found out about the PR's honesty (a dropped
@@ -69,6 +72,21 @@ function headSuite(ctx) {
     if (run.failed.length === 0) return { green: true, run };
   }
   return { green: false, run };
+}
+
+// proof.minDiffCoverage: the share of its added executable source lines the
+// PR must actually have the head suite execute. The ratio is computed where
+// the diff and the head worktree live (evaluate()), never here, so this stays
+// a pure check of a number already on the head run: null (coverage off, a
+// runner that produces none, nothing executable added) never fails a proof.
+function diffCoverageNotes(ctx, head) {
+  const min = ctx.config.proof.minDiffCoverage;
+  if (!(min > 0) || !head.green) return [];
+  const ratio = head.run?.coverageRatio;
+  if (ratio != null && ratio < min) {
+    return [failReason({ code: 'DIFF_UNCOVERED', pct: Math.floor(ratio * 100), minPct: Math.round(min * 100) })];
+  }
+  return [];
 }
 
 // `head` reuses an already-run head suite instead of running it again.
@@ -151,6 +169,7 @@ export function proveChange(kind, ctx) {
       const head = headSuite(ctx);
       const notes = [pass('no test changes; full suite green on base')];
       notes.push(head.green ? ciNote(ctx, head) : failReason({ code: 'SUITE_RED_ON_HEAD' }));
+      notes.push(...diffCoverageNotes(ctx, head));
       return result(notes, { blocked: head.green && ctx.ci === 'pending', tamperNotes: countDropped(base, head.run) });
     }
     case 'feature':
@@ -160,7 +179,7 @@ export function proveChange(kind, ctx) {
       // The base suite is red here (the new tests fail on it); only its count matters.
       const base = ctx.runBase(null);
       const head = headSuite(ctx);
-      return result([...proof, ciNote(ctx, head)], { blocked: ctx.ci === 'pending', tamperNotes: countDropped(base, head.run) });
+      return result([...proof, ciNote(ctx, head), ...diffCoverageNotes(ctx, head)], { blocked: ctx.ci === 'pending', tamperNotes: countDropped(base, head.run) });
     }
     default:
       return result([fail('changes fit no single kind (tests only, or nothing)')], { blocked: true });

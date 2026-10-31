@@ -4,9 +4,11 @@ import { dirname, join, resolve } from 'node:path';
 import { parseFlags } from '../args.mjs';
 import { UsageError } from '../errors.mjs';
 import { CONFIG_FILE, parseConfig } from '../config.mjs';
+import { bucketPaths } from '../classify.mjs';
+import { addedLineNumbers, computeDiffCoverage } from '../coverage.mjs';
 import { proveChange } from '../prove.mjs';
 import { decide } from '../decide.mjs';
-import { DEFAULT_LEDGER, readLedger, trustFor } from '../ledger.mjs';
+import { DEFAULT_LEDGER, readLedger, trustFor, verifyLedger } from '../ledger.mjs';
 import { EXIT_CODES, MAX_NOTES, formatVerdict, makeVerdict } from '../verdict.mjs';
 import { notAnAgentPr, identityFor } from '../agents.mjs';
 import { inspect } from '../inspect.mjs';
@@ -60,11 +62,18 @@ function fingerprint(paths) {
  * With `testUser` (check --test-user) the PR's tests run as that unprivileged
  * OS user, and everything it still runs is killed before the proof is read.
  */
-export function evaluate({ root, baseSha, headSha, config, claims, ci, issueLabels = [], agent, model, ledger, ledgerPath = null, testUser = null }, deps = defaultDeps) {
+export function evaluate({ root, baseSha, headSha, config, configSha = null, claims, ci, issueLabels = [], agent, model, ledger, ledgerPath = null, testUser = null }, deps = defaultDeps) {
   const { kind, files, testFiles, tamperNotes, holdNotes } = inspect({ root, baseSha, headSha, config, claims, issueLabels }, deps);
   if (tamperNotes.length > 0) return { kind, files, tamperNotes, holdNotes, proof: null, verdict: decide({ kind, tamperNotes }) };
 
   const newTests = files.filter((f) => f.status === 'A' && testFiles.includes(f.path)).map((f) => f.path);
+  // Diff-line coverage (proof.minDiffCoverage > 0): the share of its added
+  // executable source lines the PR must have the head suite execute. The diff
+  // and the head worktree live here, not in proveChange, so the proof stays
+  // pure: evaluate() attaches the ratio to the head run, the proof reads it.
+  const wantCoverage = config.proof.minDiffCoverage > 0;
+  const diffAdded = wantCoverage ? addedLineNumbers(deps.git.diff(root, baseSha, headSha)) : null;
+  const sourceFiles = wantCoverage ? bucketPaths(files.map((f) => f.path), config).source : [];
   const trees = {};
   let sandboxed = null; // { user, home, modules } once the first worktree is handed over
   const tree = (which) => {
@@ -89,13 +98,22 @@ export function evaluate({ root, baseSha, headSha, config, claims, ci, issueLabe
   };
   const runner = (which) => (only) => {
     const dir = tree(which);
-    return deps.runTests(dir, {
+    const collect = wantCoverage && which === 'head' && only === null;
+    const run = deps.runTests(dir, {
       testCommand: config.testCommand,
       testFileCommand: config.testFileCommand,
       only,
       timeoutSec: config.limits.testTimeoutSec,
       testUser: sandboxed,
+      collectCoverage: collect,
     });
+    // Read while the worktree still exists: offsets are mapped to lines from
+    // the very files that ran. No V8 data (a non-Node runner) leaves the ratio
+    // unset and the coverage proof simply does not fire.
+    if (collect && Array.isArray(run.v8Coverage)) {
+      run.coverageRatio = computeDiffCoverage({ addedLinesByFile: diffAdded, sourceFiles, v8Coverage: run.v8Coverage, repoRoot: dir }).ratio;
+    }
+    return run;
   };
   const guarded = guardedPaths(deps.git.commonDir(root), ledgerPath);
   const before = fingerprint(guarded);
@@ -127,7 +145,16 @@ export function evaluate({ root, baseSha, headSha, config, claims, ci, issueLabe
   if (proof.tamperNotes?.length > 0) {
     return { kind, files, tamperNotes: proof.tamperNotes, holdNotes, proof, verdict: decide({ kind, tamperNotes: proof.tamperNotes }) };
   }
-  const trust = kind ? trustFor(ledger, { kind, agent, model }, config.trust) : null;
+  // Trust is earned per (kind, agent, model) from the ledger — and, when the
+  // base branch asks for it (trust.verifyCommits), only from outcomes whose
+  // merge commit is real history of the gated base (configSha, the fetched
+  // base tip; the merge-base before it otherwise). The ledger on disk is
+  // never rewritten: verification is a read-time view, so a forged
+  // mergeproof-ledger entry buys nothing and a rebase cannot erase a revert.
+  const ledgerView = config.trust.verifyCommits
+    ? verifyLedger(ledger, (o) => deps.git.isAncestor(root, o.mergeCommit, configSha ?? baseSha))
+    : ledger;
+  const trust = kind ? trustFor(ledgerView, { kind, agent, model }, config.trust) : null;
   return { kind, files, tamperNotes, holdNotes, proof, trust, verdict: decide({ kind, tamperNotes, proof, trust, holdNotes }) };
 }
 

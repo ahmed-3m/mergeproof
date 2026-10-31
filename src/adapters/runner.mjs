@@ -1,3 +1,6 @@
+import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { runProcess } from './process.mjs';
 import { wrap } from './sandbox.mjs';
 import { SAFE_PATH } from '../tamper.mjs';
@@ -39,10 +42,13 @@ export function cleanEnv(sourceEnv = process.env) {
 }
 
 // `testUser` ({ user, home }, from check --test-user) runs the command as that
-// unprivileged OS user through sudo; see sandbox.mjs.
-function run(cwd, command, extra, timeoutSec, testUser) {
+// unprivileged OS user through sudo; see sandbox.mjs. `covDir`, when set, is
+// handed to the child as NODE_V8_COVERAGE so a full-suite run leaves V8
+// coverage JSON behind for the diff-coverage proof (proof.minDiffCoverage).
+function run(cwd, command, extra, timeoutSec, testUser, covDir = null) {
   const [bin, ...args] = command.trim().split(/\s+/);
   const env = cleanEnv();
+  if (covDir) env.NODE_V8_COVERAGE = covDir;
   const argv = testUser ? wrap(testUser.user, testUser.home, bin, [...args, ...extra], env) : { bin, args: [...args, ...extra] };
   const res = runProcess(argv.bin, argv.args, {
     cwd,
@@ -97,18 +103,49 @@ export function parseTestCount(output) {
   return total;
 }
 
-/** @returns {{ passed: string[], failed: string[], count?: number|null }} */
-export function runTests(repoRoot, { testCommand, testFileCommand, only = null, timeoutSec = 600, testUser = null }) {
+/** @returns {{ passed: string[], failed: string[], count?: number|null, v8Coverage?: object[] }} */
+export function runTests(repoRoot, { testCommand, testFileCommand, only = null, timeoutSec = 600, testUser = null, collectCoverage = false }) {
   const passed = [];
   const failed = [];
   if (only === null) {
-    const { ok, output } = run(repoRoot, testCommand, [], timeoutSec, testUser);
-    (ok ? passed : failed).push(SUITE);
-    return { passed, failed, count: parseTestCount(output) };
+    // Full-suite runs can collect V8 coverage (NODE_V8_COVERAGE) for the
+    // diff-coverage proof. The dir is world-writable under --test-user so the
+    // test user's processes (node --test spawns one per file) can write to it,
+    // and it is removed once the JSON blobs are read back.
+    let covDir = null;
+    try {
+      if (collectCoverage) {
+        covDir = mkdtempSync(join(tmpdir(), 'mp-v8cov-'));
+        if (testUser) chmodSync(covDir, 0o777);
+      }
+      const { ok, output } = run(repoRoot, testCommand, [], timeoutSec, testUser, covDir);
+      (ok ? passed : failed).push(SUITE);
+      const result = { passed, failed, count: parseTestCount(output) };
+      if (covDir) result.v8Coverage = readV8Coverage(covDir);
+      return result;
+    } finally {
+      if (covDir) rmSync(covDir, { recursive: true, force: true });
+    }
   }
   for (const file of only) {
     if (!SAFE_PATH.test(file)) throw new Error(`refusing to run unsafe test path ${JSON.stringify(file)}`);
     (run(repoRoot, testFileCommand, [file], timeoutSec, testUser).ok ? passed : failed).push(file);
   }
   return { passed, failed };
+}
+
+// One parsed JSON blob per file the run left behind. A file that does not
+// parse (a torn write) is not a coverage result; an empty dir means the
+// runner produced none, and the coverage proof simply has nothing to read.
+function readV8Coverage(dir) {
+  const blobs = [];
+  for (const name of readdirSync(dir)) {
+    if (!name.endsWith('.json')) continue;
+    try {
+      blobs.push(JSON.parse(readFileSync(join(dir, name), 'utf8')));
+    } catch {
+      // a torn write is not a coverage result
+    }
+  }
+  return blobs;
 }

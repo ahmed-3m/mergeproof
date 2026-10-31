@@ -76,6 +76,8 @@ Then every kind except deps needs CI green. Without a CI result (local preflight
 
 Feature and bugfix changes get no count check: their base worktree carries the PR's new (and there failing) test files, so a base full-suite count is not comparable to head's.
 
+`proof.minDiffCoverage` (default `0`, off) is the floor on the share of the PR's added executable source lines the head suite must actually execute, measured from raw V8 coverage (`NODE_V8_COVERAGE`) the runner collects on head full-suite runs. `src/coverage.mjs` parses the diff for added lines, maps V8's nested ranges to lines (the innermost range covering a line decides; blank, `//`-comment and lone closing-punctuation lines never count), and merges every test process's data — a changed source file nothing even imported counts as fully uncovered. Below the floor the proof is weak (`RETRY`, reason `DIFF_UNCOVERED`); a runner that produces no V8 data (a non-Node suite) leaves the ratio unset and the check never fires, so the key only belongs in Node repos.
+
 ## Decision table
 
 | Condition (checked in order) | Verdict |
@@ -109,8 +111,8 @@ v1 reads plain JSON, so the gate needs no parser of its own. YAML may come later
   },
   "issueLabels": { "bugfix": ["bug"] },
   "limits": { "maxDiffLines": 300, "testTimeoutSec": 600, "ciWaitSec": 600 },
-  "proof": { "baseFailRuns": 2, "headPassRuns": 3, "headReruns": 1 },
-  "trust": { "minOutcomes": 10, "minCleanRate": 0.9, "revertWindowDays": 14 },
+  "proof": { "baseFailRuns": 2, "headPassRuns": 3, "headReruns": 1, "minDiffCoverage": 0 },
+  "trust": { "minOutcomes": 10, "minCleanRate": 0.9, "revertWindowDays": 14, "verifyCommits": false },
   "agents": { "logins": [], "branchPrefixes": ["agent/"] },
   "quarantine": []
 }
@@ -146,7 +148,7 @@ Every PR whose proof held is logged, even when the verdict is `HUMAN` because th
 
 A revert is any commit on the synced ref that says `This reverts commit <sha>` of the merge (`git revert`), that has `Reverts owner/repo#N` on a line of its own for this repo's PR (GitHub's revert-PR body, kept when the revert PR is squashed with its description), or whose change is the exact undo of the merge (same `git patch-id --stable`), whatever its message. The last two must land after the merge. A partial revert, or one squashed together with other changes, matches none of them and is still missed. A false match only marks an outcome reverted, which lowers trust, never raises it.
 
-Trust per (kind, agent, model) counts only `clean` and `reverted` outcomes: at least `minOutcomes`, at least `minCleanRate` clean, and no revert in the last `minOutcomes` merges. Agent and model come from `--agent` and `--model`, set by the workflow and never read from the PR.
+Trust per (kind, agent, model) counts only `clean` and `reverted` outcomes: at least `minOutcomes`, at least `minCleanRate` clean, and no revert in the last `minOutcomes` merges. Agent and model come from `--agent` and `--model`, set by the workflow and never read from the PR. With `trust.verifyCommits` (default `false`) the ledger is first anchored in git: `verifyLedger` keeps a `clean` or `pending` outcome only when its `mergeCommit` is an ancestor of the gated base branch tip (`git merge-base --is-ancestor`, `check` against the fetched base tip, `apply` against the same snapshot), so a forged `mergeproof-ledger` branch — or an outcome whose commit a rebase dropped — grants no trust. `reverted` outcomes are always kept: a penalty can never be erased. The ledger on disk is never rewritten by this; verification is a read-time view.
 
 ## Decisions
 

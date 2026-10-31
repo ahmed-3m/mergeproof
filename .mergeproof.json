@@ -1,5 +1,8 @@
 {
   "mode": "enforce",
+  "trust": {
+    "verifyCommits": true
+  },
   "paths": {
     "agentInstructions": [
       "AGENTS.md",

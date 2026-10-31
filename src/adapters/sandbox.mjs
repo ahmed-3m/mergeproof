@@ -90,7 +90,11 @@ export function claim(dir, user) {
 export function wrap(user, home, bin, args, env) {
   // -E keeps the cleaned environment; sudo's secure_path would still replace
   // PATH, and HOME must be one the test user can write, so `env` sets both.
-  return { bin: 'sudo', args: ['-n', '-E', '-u', user, '--', 'env', `HOME=${home}`, `PATH=${env.PATH ?? ''}`, bin, ...args] };
+  // NODE_V8_COVERAGE goes the same way: the coverage dir is chmod 0777 for the
+  // test user, but the variable itself would not survive every sudoers filter.
+  const kept = [`HOME=${home}`, `PATH=${env.PATH ?? ''}`];
+  if (env.NODE_V8_COVERAGE !== undefined) kept.push(`NODE_V8_COVERAGE=${env.NODE_V8_COVERAGE}`);
+  return { bin: 'sudo', args: ['-n', '-E', '-u', user, '--', 'env', ...kept, bin, ...args] };
 }
 
 /** Kill every process the test user still runs, e.g. a daemon a test forked. */
