@@ -6,15 +6,17 @@ import { makeVerdict } from './verdict.mjs';
 //   no kind fits the paths      → HUMAN
 //   proof weak                  → RETRY (the agent can fix it on the same PR)
 //   proof impossible            → HUMAN (e.g. the suite is already red on base)
+//   holdNotes non-empty         → HUMAN (proofs still run and weak proofs still RETRY to teach the agent; only auto-merge is withheld)
 //   kind not trusted for agent  → HUMAN
 //   otherwise                   → MERGE
 /**
  * @param {{ kind: string|null, tamperNotes: Array<{ok:boolean,text:string}>,
  *           proof: { ok: boolean, weak: boolean, notes: Array<{ok:boolean,text:string}> } | null,
- *           trust: { trusted: boolean, text: string } | null }} input
+ *           trust: { trusted: boolean, text: string } | null,
+ *           holdNotes?: Array<{ok:boolean,text:string}> }} input
  * @returns {ReturnType<import('./verdict.mjs').makeVerdict>}
  */
-export function decide({ kind, tamperNotes = [], proof = null, trust = null }) {
+export function decide({ kind, tamperNotes = [], proof = null, trust = null, holdNotes = [] }) {
   if (tamperNotes.length > 0) return makeVerdict('HUMAN', { kind, notes: tamperNotes });
   const proofNotes = proof?.notes ?? [];
   if (kind === 'deps') {
@@ -23,6 +25,7 @@ export function decide({ kind, tamperNotes = [], proof = null, trust = null }) {
   if (!kind || !proof) return makeVerdict('HUMAN', { kind, notes: proofNotes });
   if (proof.weak) return makeVerdict('RETRY', { kind, notes: proofNotes });
   if (!proof.ok) return makeVerdict('HUMAN', { kind, notes: proofNotes });
+  if (holdNotes.length > 0) return makeVerdict('HUMAN', { kind, notes: [...holdNotes, ...proofNotes] });
   if (!trust?.trusted) {
     return makeVerdict('HUMAN', { kind, notes: [{ ok: false, text: trust?.text ?? `${kind} is not trusted yet` }, ...proofNotes] });
   }

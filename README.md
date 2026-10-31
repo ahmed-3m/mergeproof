@@ -56,6 +56,8 @@ npx @ahmed-3m/mergeproof apply verdict.json --pr <pr-url> --head <sha> --agent <
 npx @ahmed-3m/mergeproof check --local
 # nightly: settle the ledger, record reverts
 npx @ahmed-3m/mergeproof sync
+# open agent-proposed issues for ready ROADMAP.md items (a maintainer still labels each `agent`)
+npx @ahmed-3m/mergeproof roadmap
 ```
 
 For a local or manual run, `check` without `--verdict-out` does everything in one process. Never run it that way in a CI job that holds a write token: it runs the PR's test code in the same process.
@@ -117,7 +119,7 @@ npx @ahmed-3m/mergeproof init --model <m> --bot-login <bot>
 Run `init` inside your repository: a git repo with a `pull_request` CI workflow and a `scripts.test`. It detects the install command (from the lockfile), the test command, the test paths and the CI workflow; override any of them with `--install-command`, `--test-command` or `--ci-workflow`. It then writes:
 
 - `.mergeproof.json`, always with `mode: shadow`
-- the three workflow templates from [`templates/workflows/`](templates/README.md), placeholders filled
+- the four workflow templates from [`templates/workflows/`](templates/README.md), placeholders filled
 - the bugfix and feature skills under `.mergeproof/skills/` (see [skills/](skills/README.md))
 
 Existing files are never silently replaced (use `--force`), `--dry-run` prints the full plan without writing, and re-runs are idempotent.
@@ -174,7 +176,7 @@ Limits: a dispatched PR has no dispatch marker, so the gate gets no `--issue` (e
 
 | Input | Default | Meaning |
 |---|---|---|
-| `command` | (required) | `check`, `apply` or `sync`; anything else exits `2`. |
+| `command` | (required) | `check`, `apply`, `sync` or `roadmap`; anything else exits `2`. |
 | `args` | `''` | Arguments for the command. They arrive through the environment and are split on whitespace with no shell expansion, globbing or quoting. |
 | `node-version` | `'22'` | Node.js version to set up (>= 18.17). |
 
@@ -202,13 +204,14 @@ The `exit-code` output carries the CLI's exit code. A `RETRY` or `HUMAN` fails t
 
 (Trimmed from the template, which also passes the skill, attempt, issue and ledger path.)
 
-[`templates/workflows/`](templates/README.md) holds the three workflows `init` installs:
+[`templates/workflows/`](templates/README.md) holds the four workflows `init` installs:
 
 | Workflow | Flow | What it does |
 |---|---|---|
 | `mergeproof-issue.yml` | issue → PR | An issue from an allowlisted author, or one a writer labels `agent`, starts the coding agent with the skill for its kind. |
 | `mergeproof-pr.yml` | PR → outcome | After the repo's CI completes on a PR: the read-only gate job, then the apply job. On `RETRY` it re-dispatches the agent while attempts remain (up to 3, when the issue is known); otherwise it labels `needs-human`. |
 | `mergeproof-sync.yml` | nightly | Settles the ledger and opens a triage issue for each newly reverted merge. |
+| `mergeproof-roadmap.yml` | ROADMAP.md → issues | On a push that changes `ROADMAP.md` (or on dispatch), opens one `agent-proposed` issue per `ready` item, never twice. The issues start nothing until a writer labels them `agent`. |
 
 The apply job and the nightly sync share the `mergeproof-ledger` concurrency group, so ledger writes never overlap. GitHub keeps at most one pending run per group, so a PR can occasionally get no verdict from a cycle; re-run it with:
 
@@ -216,10 +219,13 @@ The apply job and the nightly sync share the `mergeproof-ledger` concurrency gro
 gh workflow run mergeproof-pr.yml -f pr=<number>
 ```
 
-The issue workflow's coding agent is picked by the `MERGEPROOF_HARNESS` repository variable:
+The issue workflow's coding agent is picked by the `MERGEPROOF_HARNESS` repository variable: `claude` (default, Claude Code with `CLAUDE_CODE_OAUTH_TOKEN` or `MERGEPROOF_MODEL_KEY`), `gemini` (Gemini CLI) or `agy` (the Antigravity CLI; put a Gemini API key in `MERGEPROOF_MODEL_KEY`). Every harness runs the same way, through `mergeproof loop`, split across three jobs so the agent never shares a runner with a GitHub credential:
 
-- **`claude`** (default): [`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action), with Anthropic's API or any Anthropic-compatible endpoint (`MERGEPROOF_MODEL_BASE_URL`, e.g. GLM).
-- **`agy`**: the Antigravity CLI, headless. Set `MERGEPROOF_AGENT=agy` and put a Gemini API key in `MERGEPROOF_MODEL_KEY`. The template installs the pinned 1.4.6 release checked by SHA-512 (not Google's unpinned installer), runs it in a container pinned by digest (`MERGEPROOF_AGY_IMAGE`), and splits the run across `agent`, `agy-run` and `agy-publish` jobs so agy never shares a runner with a GitHub credential. It has no tool deny-list; [read the agy notes](templates/README.md#the-agy-harness-mergeproof_harnessagy) before switching.
+- **`agent`** (trusted context, no secret) prepares the issue and skill files.
+- **`agent-run`** runs the harness in a credential-free container pinned by digest (`MERGEPROOF_AGENT_IMAGE`; `MERGEPROOF_AGY_IMAGE` still works), installed from one release checked by SHA-512. The model credential is passed only to its run step.
+- **`agent-publish`** runs on a fresh runner, validates the result as untrusted data (refusing edits to agent-instruction files) and only then pushes with the bot token.
+
+[Read the harness notes](templates/README.md#the-agent-harness-mergeproof_harness) for the supply-chain and deny-list caveats before switching.
 
 Placeholders, repository variables and secrets are documented in [templates/README.md](templates/README.md), and every job's permissions in [SECURITY.md](SECURITY.md#workflow-permissions).
 
@@ -230,7 +236,7 @@ Mergeproof runs on its own agent PRs, in `enforce` mode ([`.mergeproof.json`](.m
 - Agents are `ahmed-3m` (Claude Code, `claude-opus-5-5`) and `mergeproof-bot` (Gemini CLI, `gemini-3-flash-preview`), each in its own trust bucket via `agents.identities`. A PR is gated only when its author is one of them and its branch starts with `agent/`.
 - The gate runs the action pinned to a commit on `main`, never `@v1` and never the PR's code.
 - `skills/**` counts as agent instructions here, so an agent PR that edits a skill goes to a human.
-- The issue workflow runs the `gemini` harness (Gemini CLI 0.64.0 from the npm tarball, checked against its integrity hash, on the same three-job split as agy, with `MERGEPROOF_AGENT=gemini-cli`) or `agy`. `claude-code-action` is not among this repo's allowed actions, so the `claude` harness is not used here.
+- The issue workflow runs the `gemini` harness (Gemini CLI 0.64.0 from the npm tarball, checked against its integrity hash, with `MERGEPROOF_AGENT=gemini-cli`) or `agy`, on the same three-job split. A promotion PR switches it to `claude` once the release that runs Claude Code in the container is out.
 
 Until a kind has earned trust, every verdict here is `HUMAN` too.
 

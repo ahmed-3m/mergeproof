@@ -42,11 +42,34 @@ const SCENARIOS = [
   },
   { n: 7, name: 'lockfile-only bump', expect: 'HUMAN', kind: 'deps', note: /dependency changes always need a human/, msg: 'chore(deps): bump', change: { 'package-lock.json': '{ "lockfileVersion": 3 }\n' } },
   { n: 8, name: 'flaky new test', labels: ['bug'], expect: 'RETRY', kind: 'bugfix', note: /flaky on base \(failed 1\/2\)/, msg: 'fix: mul by 3', change: { 'src/math.mjs': FIXED_MATH, 'tests/mul.test.mjs': FLAKY_TEST } },
+  {
+    n: 9, name: 'honest bugfix touching a human-only path', labels: ['bug'], extraConfig: { paths: { humanOnly: ['src/rules.mjs'] } },
+    change: { 'src/math.mjs': FIXED_MATH, 'tests/mul.test.mjs': MUL_TEST, 'src/rules.mjs': '// rules\n' },
+    msg: 'fix: mul by 3', expect: 'HUMAN', kind: 'bugfix', note: /touches a human-only path: src\/rules\.mjs/,
+  },
+  {
+    n: 10, name: 'human-only path touched, but new test also passes on base', labels: ['bug'], extraConfig: { paths: { humanOnly: ['src/rules.mjs'] } },
+    change: { 'src/sum.mjs': "export { add as sum } from './math.mjs';\n", 'tests/sum.test.mjs': testFile('add again', ['assert.equal(add(1, 1), 2);']), 'src/rules.mjs': '// rules\n' },
+    msg: 'fix: sum helper', expect: 'RETRY', kind: 'bugfix', note: /passes on base, so it proves nothing/,
+  },
+  {
+    n: 11, name: 'only pyproject.toml changed, CI green', ci: 'green', expect: 'HUMAN', kind: 'deps',
+    note: /dependency changes always need a human/, msg: 'chore(deps): bump',
+    change: { 'pyproject.toml': '[project]\nname = "fixture"\nversion = "0.1.0"\n' },
+  },
+  {
+    n: 12, name: 'new Go test file with a skip marker', expect: 'HUMAN', kind: 'feature',
+    note: /adds a skip\/only marker in pkg\/foo_test\.go/, msg: 'feat: add foo',
+    change: {
+      'src/foo.go': 'package pkg\n',
+      'pkg/foo_test.go': 'package pkg\n\nimport "testing"\n\nfunc TestFoo(t *testing.T) {\n\tt.Skip("later")\n}\n',
+    },
+  },
 ];
 
 for (const s of SCENARIOS) {
   test(`scenario ${s.n}: ${s.name} → ${s.expect}`, () => {
-    const repo = createRepo();
+    const repo = createRepo(undefined, s.extraConfig);
     try {
       const baseSha = repo.git(['rev-parse', 'HEAD']);
       repo.branch('agent/work').write(s.change);
@@ -58,7 +81,7 @@ for (const s of SCENARIOS) {
           headSha,
           config: parseConfig(repo.git(['show', `${baseSha}:.mergeproof.json`])),
           claims: { subjects: [s.msg] },
-          ci: null,
+          ci: s.ci ?? null,
           issueLabels: s.labels ?? [],
           agent: 'claude-code',
           model: 'glm-5.2',

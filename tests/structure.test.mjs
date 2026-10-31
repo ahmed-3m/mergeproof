@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, relative, resolve, sep } from 'node:path';
 import { VERSION } from '../src/version.mjs';
 
 const PKG = JSON.parse(readFileSync(resolve('package.json'), 'utf8'));
@@ -49,6 +49,7 @@ const CONTRACT = {
   'src/prove.mjs': ['proveChange'],
   'src/decide.mjs': ['decide'],
   'src/ledger.mjs': ['LEDGER_SCHEMA', 'DEFAULT_LEDGER', 'readLedger', 'writeLedger', 'appendOutcome', 'trustFor'],
+  'src/roadmap.mjs': ['parseRoadmap', 'ROADMAP_MARKER', 'planIssues', 'DEFAULT_PROPOSER'],
   'src/trailer.mjs': ['TRAILER_KEY', 'formatTrailer', 'parseTrailer'],
   'src/agents.mjs': ['notAnAgentPr', 'identityFor'],
   'src/inspect.mjs': ['inspect'],
@@ -57,11 +58,13 @@ const CONTRACT = {
   'src/commands/check.mjs': ['runCheck', 'evaluate'],
   'src/commands/apply.mjs': ['runApply'],
   'src/commands/sync.mjs': ['runSync', 'settle'],
-  'src/commands/init.mjs': ['runInit', 'detect'],
+  'src/commands/roadmap.mjs': ['runRoadmap'],
+  'src/commands/init.mjs': ['runInit', 'detect', 'fillTemplate'],
   'src/commands/dispatch.mjs': ['runDispatch', 'buildIssueFile', 'agentPrompt', 'agentEnv', 'HARNESS_BIN', 'TOKEN_ENV'],
+  'src/commands/loop.mjs': ['runLoop', 'HARNESSES', 'harnessArgv', 'buildPrompt', 'infraFailure', 'INFRA_REASONS'],
   'src/adapters/process.mjs': ['runProcess'],
   'src/adapters/git.mjs': ['changedFiles', 'changedPaths', 'diff', 'addedLines', 'addWorktree', 'removeWorktree', 'addBranchWorktree', 'refExists', 'commonDir', 'log', 'patchId', 'listFiles', 'grep'],
-  'src/adapters/gh.mjs': ['getPullRequest', 'getChecksStatus', 'waitForChecks', 'issueLabels', 'squashMerge', 'comment', 'createIssue', 'addLabel', 'repoView', 'createLabel', 'setVariable', 'setSecret', 'apiJson', 'branchExists', 'redactSecret', 'getIssue', 'issueComments', 'collaboratorPermission'],
+  'src/adapters/gh.mjs': ['getPullRequest', 'getChecksStatus', 'waitForChecks', 'issueLabels', 'squashMerge', 'comment', 'createIssue', 'listIssues', 'addLabel', 'repoView', 'createLabel', 'setVariable', 'setSecret', 'apiJson', 'branchExists', 'redactSecret', 'getIssue', 'issueComments', 'collaboratorPermission'],
   'src/adapters/runner.mjs': ['runTests', 'parseTestCount'],
   'src/adapters/sandbox.mjs': ['TEST_USER', 'check', 'shareModules', 'makeHome', 'claim', 'wrap', 'killAll', 'release'],
 };
@@ -81,3 +84,42 @@ test('default config uses a valid mode and covers every kind proof needs', async
   for (const key of ['tests', 'docs', 'manifests']) assert.ok(cfg.paths[key].length > 0);
   assert.notEqual(defaultConfig(), defaultConfig(), 'each call returns a fresh copy');
 });
+
+// The gate decides a pull request's fate, so the code it loads is a security
+// boundary: it may not pull in agent-side modules (dispatch runs a coding agent
+// and holds a token; loop will run inside the agent container), and it may not
+// depend on a package. Imports are followed from the source text, so this
+// still holds with the CLI loading commands lazily.
+const IMPORT_RE = /(?:\bimport|\bexport)\s[^'";]*?\bfrom\s*['"]([^'"]+)['"]|\bimport\s*['"]([^'"]+)['"]|\bimport\(\s*['"]([^'"]+)['"]\s*\)/g;
+
+const rel = (f) => relative(process.cwd(), f).split(sep).join('/');
+
+function importClosure(entry) {
+  const seen = new Set();
+  const bare = [];
+  const queue = [resolve(entry)];
+  while (queue.length > 0) {
+    const file = queue.pop();
+    if (seen.has(file)) continue;
+    seen.add(file);
+    const source = readFileSync(file, 'utf8');
+    for (const m of source.matchAll(IMPORT_RE)) {
+      const spec = m[1] ?? m[2] ?? m[3];
+      if (spec.startsWith('node:')) continue;
+      if (spec.startsWith('.')) queue.push(resolve(dirname(file), spec));
+      else bare.push(`${rel(file)} imports ${spec}`);
+    }
+  }
+  return { files: [...seen].map((f) => rel(f)), bare };
+}
+
+for (const entry of ['src/commands/check.mjs', 'src/commands/apply.mjs', 'src/commands/sync.mjs', 'src/land.mjs']) {
+  test(`${entry} never reaches agent-side modules or a package`, () => {
+    const { files, bare } = importClosure(entry);
+    assert.ok(files.length > 1, 'the closure walk found the imports');
+    for (const banned of ['src/commands/dispatch.mjs', 'src/commands/loop.mjs']) {
+      assert.ok(!files.includes(banned), `${entry} must not import ${banned} (directly or through another module)`);
+    }
+    assert.deepEqual(bare, [], 'only relative and node: imports');
+  });
+}
