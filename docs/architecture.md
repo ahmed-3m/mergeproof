@@ -74,7 +74,7 @@ Feature and bugfix have the same proof, so the label only picks the trust bucket
 
 Then every kind except deps needs CI green. Without a CI result (local preflight, or a repo with no checks) the full suite runs on head instead, with `headReruns` reruns before a failure counts; a refactor runs the head suite even with a CI result, because flow 2 needs green on base and head and the case count has to be compared. Checks whose name contains `mergeproof` are ignored, since the gate's own job is still running.
 
-Feature and bugfix changes get no count check: their base worktree carries the PR's new (and there failing) test files, so a base full-suite count is not comparable to head's.
+Feature and bugfix changes get the same count check: their base worktree carries the PR's new (and there failing) test files, so a base full-suite count is comparable to head's — the base suite being red does not matter, only its count is read.
 
 `proof.minDiffCoverage` (default `0`, off) is the floor on the share of the PR's added executable source lines the head suite must actually execute, measured from raw V8 coverage (`NODE_V8_COVERAGE`) the runner collects on head full-suite runs. `src/coverage.mjs` parses the diff for added lines, maps V8's nested ranges to lines (the innermost range covering a line decides; blank, `//`-comment and lone closing-punctuation lines never count), and merges every test process's data — a changed source file nothing even imported counts as fully uncovered. Below the floor the proof is weak (`RETRY`, reason `DIFF_UNCOVERED`); a runner that produces no V8 data (a non-Node suite) leaves the ratio unset and the check never fires, so the key only belongs in Node repos. Because `NODE_V8_COVERAGE` is written by the test child process itself, this floor guards against lazy or untested agent additions, not against a deliberately hostile test forging coverage JSON.
 
@@ -113,7 +113,7 @@ v1 reads plain JSON, so the gate needs no parser of its own. YAML may come later
   "limits": { "maxDiffLines": 300, "testTimeoutSec": 600, "ciWaitSec": 600 },
   "proof": { "baseFailRuns": 2, "headPassRuns": 3, "headReruns": 1, "minDiffCoverage": 0 },
   "trust": { "minOutcomes": 10, "minCleanRate": 0.9, "revertWindowDays": 14, "verifyCommits": false },
-  "agents": { "logins": [], "branchPrefixes": ["agent/"] },
+  "agents": { "logins": [], "branchPrefixes": ["agent/"], "identities": {} },
   "quarantine": []
 }
 ```

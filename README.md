@@ -31,12 +31,12 @@ It uses plain, deterministic code. It never calls an LLM, so the agent being jud
 
 1. **Classify.** Read the kind from the changed paths.
 2. **Check for tampering.** Any hit sends the PR to a human:
-   - edits to the gate (`.mergeproof.json`, `.mergeproof/`, workflows)
+   - edits to the gate (`.mergeproof.json`, `.mergeproof/`, `.github/`)
    - existing tests edited, renamed or deleted, or new skip markers (`.skip`, `.only`, …)
    - edits to agent instructions (`AGENTS.md`, `CLAUDE.md`, …)
    - a label or commit prefix that disagrees with the paths
    - a diff over 300 lines (manifests and lockfiles not counted)
-   - unsafe file names, or a refactor that drops test cases
+   - unsafe file names, or a suite that runs fewer test cases than before
 3. **Prove.** Each kind has its own proof, run in fresh worktrees:
 
    | Kind | Proof |
@@ -68,7 +68,7 @@ Install into your repo (needs a `pull_request` CI workflow and a `scripts.test`)
 npx @ahmed-3m/mergeproof init --model <model> --bot-login <bot>
 ```
 
-`init` writes `.mergeproof.json` (in `shadow` mode), four workflows and the agent skills. Use `--dry-run` to preview. It never overwrites files without `--force`.
+`init` writes `.mergeproof.json` (in `shadow` mode), four workflows and the mergeproof-bugfix and mergeproof-feature skills under `.mergeproof/skills/`. Use `--dry-run` to preview. It never overwrites files without `--force`.
 
 Check one PR by hand:
 
@@ -93,8 +93,10 @@ The PR counts as a bugfix because issue 17 has the maintainer's `bug` label; wit
 | `apply <verdict-file> --pr <pr-url>` | Land a verdict: merge, comment, record the outcome. Runs no PR code. |
 | `sync` | Nightly: settle outcomes and record reverts. |
 | `roadmap` | Open one proposed issue per `ready` item in `ROADMAP.md`. A maintainer still labels each `agent`. |
+| `retro [--events <file>]` | Summarize agent performance and failure modes from `events.jsonl` (read-only measurement, never a gate decision). |
 | `init` | Install mergeproof into the current repo. |
 | `dispatch <issue> --harness agy` | Run agy on an issue from your machine ([docs/dispatch.md](docs/dispatch.md)). |
+| `loop --harness <name> ...` | Run a coding harness then `check --local` in rounds (agent container only; never the gate). |
 
 Run `mergeproof --help` for every option.
 
@@ -104,12 +106,15 @@ Optional `.mergeproof.json` in the repo root. It is always read from the **base 
 
 | Key | Default | Meaning |
 |---|---|---|
-| `mode` | `shadow` | `shadow` reports only; `enforce` merges on `MERGE`. |
+| `mode` | `shadow` | `shadow` reports only; `enforce` merges on `MERGE`; `off` always says `HUMAN` and writes nothing. |
 | `testCommand` | `npm test` | Runs the full suite. |
 | `testFileCommand` | `node --test` | Runs one test file. |
+| `paths.tests` | `test/**`, `tests/**`, `**/*.test.*`, … | Globs that find your tests. The proof needs them to match your suite. |
 | `agents.logins` | none | Logins of your agent accounts. Until you add one, no PR is gated. |
+| `agents.identities` | none | Login → `{ agent, model }`: each agent login gets its own trust bucket, overriding the workflow's flags. |
 | `paths.humanOnly` | none | Paths that always need a human, even for a trusted kind. |
 | `trust.minOutcomes` | `10` | Settled outcomes a kind needs before it merges on its own. |
+| `trust.verifyCommits` | `false` | Count only outcomes whose merge commit is real history of the base branch, so a forged ledger buys no trust. |
 
 Every key and default: [docs/architecture.md](docs/architecture.md#config-mergeproofjson).
 
@@ -117,44 +122,45 @@ Every key and default: [docs/architecture.md](docs/architecture.md#config-mergep
 
 ## Earning trust
 
-A kind merges on its own only after 10 settled outcomes, at least 90% clean, with no recent revert. Human merges of PRs whose proof held count too, so a new install earns trust like this:
+A kind merges on its own only after 10 settled outcomes (`trust.minOutcomes`), at least 90% clean (`trust.minCleanRate`), and no revert among its last 10 merges. Human merges of PRs whose proof held count too, so a new install earns trust like this:
 
 1. Run in `shadow` mode and let the agent open PRs.
 2. Merge the good ones yourself.
 3. After 14 days without a revert, `sync` marks each one clean.
 4. Switch to `enforce`. Trusted kinds now merge on their own.
 
-Kill switch: set the `MERGEPROOF_MODE` repository variable to `off` to stop every mergeproof workflow.
+Kill switch: set the `MERGEPROOF_MODE` repository variable to `off` to stop every mergeproof workflow; `mode: "off"` in the config silences the gate itself.
 
 ## GitHub Actions
 
-Use the action `ahmed-3m/mergeproof@v1` ([action.yml](action.yml)). Inputs: `command` (`check`, `apply`, `sync` or `roadmap`), `args`, `node-version`. Output: `exit-code`.
+Use the action `ahmed-3m/mergeproof@v1` ([action.yml](action.yml)). Inputs: `command` (`check`, `apply`, `sync`, `roadmap` or `retro`), `args`, `node-version`. Output: `exit-code`. (`loop` is not an action input: the issue workflow runs it in the agent container.)
 
 `init` installs four workflows:
 
 | Workflow | What it does |
 |---|---|
-| `mergeproof-issue.yml` | An issue from an allowlisted author, or one a writer labels `agent`, starts the coding agent. |
+| `mergeproof-issue.yml` | An issue from an allowlisted author, or one a writer labels `agent`, runs `mergeproof loop`: up to `MERGEPROOF_ROUNDS` rounds of coding, each self-checked with `check --local`, unproven reasons fed back — then the PR. |
 | `mergeproof-pr.yml` | After CI: a read-only gate job, then an apply job. `RETRY` re-runs the agent (up to 3 attempts). |
 | `mergeproof-sync.yml` | Nightly ledger sync. |
 | `mergeproof-roadmap.yml` | When `ROADMAP.md` changes: opens proposed issues for its `ready` items. |
 
 - **Coding agent:** `MERGEPROOF_HARNESS` picks `claude` (default), `gemini` or `agy`. Each runs in a container with no GitHub credential; a separate job checks its output before anything is pushed.
-- **Gate job:** runs the PR's tests with no secrets and a read-only token. Only the apply job can write.
+- **Gate job:** runs the PR's tests as an unprivileged OS user, with no secrets and a read-only token. Only the apply job can write.
 
 Variables, secrets and harness caveats: [templates/README.md](templates/README.md). Job permissions: [SECURITY.md](SECURITY.md#workflow-permissions).
 
 ## This repo gates itself
 
 - Runs in `enforce` mode on its own agent PRs.
-- Agents: `ahmed-3m` (Claude Code) and `mergeproof-bot` (Gemini CLI), each with its own trust bucket.
+- Agents: `ahmed-3m` (Claude Code, claude-opus-5-5) and `mergeproof-bot` (Claude Code, claude-sonnet-5-5), each with its own trust bucket.
 - The gate runs the action pinned to a commit on `main`, never the PR's code.
 
 ## Development
 
 ```bash
-npm test       # zero dependencies: no install step
-npm run demo   # see demo/README.md
+npm test            # zero dependencies: no install step
+npm run test:fast   # dev loop: skips the slow suites (real git fixture repos, workflow renders)
+npm run demo        # see demo/README.md
 ```
 
 | Doc | For |
@@ -163,6 +169,7 @@ npm run demo   # see demo/README.md
 | [docs/architecture.md](docs/architecture.md) | Modules, tamper rules, proof, decision table, config schema |
 | [docs/dispatch.md](docs/dispatch.md) | Running agy locally with `dispatch` |
 | [templates/README.md](templates/README.md) | Workflows, variables, secrets, agent harnesses |
+| [skills/README.md](skills/README.md) | The per-kind agent playbooks and `.mergeproof/lessons.md` |
 | [ROADMAP.md](ROADMAP.md) | Planned work, proposed to agents as issues |
 | [SECURITY.md](SECURITY.md) | Permissions and reporting a vulnerability |
 | [benchmarks/specs.md](benchmarks/specs.md) | Pre-registered gate scenarios |
