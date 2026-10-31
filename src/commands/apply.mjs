@@ -32,6 +32,7 @@ const SUSPECT_NOTE = 'gate reported an unverifiable reason (suspect)';
 // already checked by readVerdictFile; this is the semantics.
 function verifiableReason(r, { newTests, config }) {
   if (typeof r !== 'object' || !REASON_CODES.includes(r.code)) return false;
+  if (r.code === 'SUITE_RED_ON_BASE' || r.code === 'REFACTOR_CHANGES_TESTS') return false;
   const params = REASON_PARAMS[r.code] ?? [];
   const keys = Object.keys(r).filter((k) => k !== 'code');
   if (keys.some((k) => !params.includes(k))) return false;
@@ -39,7 +40,10 @@ function verifiableReason(r, { newTests, config }) {
   if (params.includes('path') && !newTests.includes(r.path)) return false;
   if (r.code === 'FLAKY_ON_BASE' && !(Number.isInteger(r.n) && r.n > 0 && r.n < r.m && r.m === config.proof.baseFailRuns)) return false;
   if (r.code === 'FLAKY_ON_HEAD' && !(Number.isInteger(r.n) && r.n > 0 && r.n < r.m && r.m === config.proof.headPassRuns)) return false;
-  if (r.code === 'DIFF_UNCOVERED' && !(Number.isInteger(r.pct) && Number.isInteger(r.minPct) && r.pct >= 0 && r.pct < r.minPct && r.minPct <= 100)) return false;
+  if (r.code === 'DIFF_UNCOVERED') {
+    const wantMinPct = Math.round((config.proof.minDiffCoverage ?? 0) * 100);
+    if (!(wantMinPct > 0 && Number.isInteger(r.pct) && r.pct >= 0 && r.pct < wantMinPct && r.minPct === wantMinPct)) return false;
+  }
   return true;
 }
 
@@ -56,7 +60,9 @@ function weakProofNotes({ reasons, kind, files, config, ci }) {
   // codes only, and only ones that held up against the re-derived world — a
   // "suspect" reason's code never reaches the measurement.
   const codes = [];
-  const fail = (text) => notes.push({ ok: false, text });
+  const fail = (text) => {
+    if (!notes.some((n) => n.text === text)) notes.push({ ok: false, text });
+  };
   const suspect = () => fail(SUSPECT_NOTE);
   const newTests = newTestFiles(files, config);
   const noNewTest = (kind === 'feature' || kind === 'bugfix') && newTests.length === 0;

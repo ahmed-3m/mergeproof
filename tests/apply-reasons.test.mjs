@@ -146,6 +146,8 @@ test('a forged reason keeps RETRY and renders "suspect": reasons never feed deci
       ['n >= m', (d) => { d.reasons = [{ code: 'FLAKY_ON_BASE', path: 'tests/mul.test.mjs', n: 2, m: 2 }]; }],
       ['NO_NEW_TEST claimed although the PR adds a test', (d) => { d.reasons = [{ code: 'NO_NEW_TEST' }]; }],
       ['CI_RED claimed although CI is green', (d) => { d.reasons = [{ code: 'CI_RED' }]; }],
+      ['DIFF_UNCOVERED claimed when minDiffCoverage is 0', (d) => { d.reasons = [{ code: 'DIFF_UNCOVERED', pct: 10, minPct: 80 }]; }],
+      ['SUITE_RED_ON_BASE claimed on a RETRY verdict', (d) => { d.reasons = [{ code: 'SUITE_RED_ON_BASE' }]; }],
     ];
     for (const [name, mutate] of cases) {
       writeFileSync(gate.file, honest);

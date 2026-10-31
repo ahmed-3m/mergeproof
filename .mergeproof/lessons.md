@@ -20,6 +20,3 @@ Format — one lesson per line, numbered, evidence last:
 
 ## Lessons
 
-- [L-1] Read `.mergeproof.json` before writing code: the repo's test paths, `testCommand`, `testFileCommand` and `limits.maxDiffLines` decide what the gate accepts, not your habits. (evidence: #12, #31)
-- [L-2] Make the new test fail on base for the exact reported reason before touching source; a test that fails for a different reason proves nothing and burns a retry. (evidence: #7, #22)
-- [L-3] Run the full suite before `check --local`: a red suite from an earlier stray edit reads as your regression in the gate's output. (evidence: #14, #40)

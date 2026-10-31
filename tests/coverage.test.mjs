@@ -129,6 +129,53 @@ test('coveredLinesFromV8 merges test processes: covered by any run counts', () =
   }
 });
 
+test('coveredLinesFromV8: inline untaken sub-branches do not mark an executed line uncovered', () => {
+  const root = mkdtempSync(join(tmpdir(), 'mp-cov-inline-'));
+  try {
+    mkdirSync(join(root, 'src'), { recursive: true });
+    const src = [
+      'export function cond(x) {',
+      '  if (x < 0) return -1;',
+      '  const f = () => 99;',
+      '  return x > 0 ? x : -x;',
+      '}',
+      '',
+    ].join('\n');
+    writeFileSync(join(root, 'src', 'inline.mjs'), src);
+    const fnStart = src.indexOf('function cond');
+    const fnEnd = src.lastIndexOf('}') + 1;
+    const guardStart = src.indexOf('return -1;');
+    const arrowStart = src.indexOf('() => 99');
+    const elseStart = src.indexOf(': -x');
+    const blobs = [
+      {
+        result: [
+          {
+            url: pathToFileURL(join(root, 'src', 'inline.mjs')).href,
+            functions: [
+              { functionName: '', ranges: [{ startOffset: 0, endOffset: src.length, count: 1 }] },
+              {
+                functionName: 'cond',
+                ranges: [
+                  { startOffset: fnStart, endOffset: fnEnd, count: 1 },
+                  { startOffset: guardStart, endOffset: guardStart + 'return -1;'.length, count: 0 },
+                  { startOffset: elseStart, endOffset: elseStart + ': -x'.length, count: 0 },
+                ],
+              },
+              { functionName: 'f', ranges: [{ startOffset: arrowStart, endOffset: arrowStart + '() => 99'.length, count: 0 }] },
+            ],
+          },
+        ],
+      },
+    ];
+    const inline = coveredLinesFromV8(blobs, root)['src/inline.mjs'];
+    assert.deepEqual([...inline.executable].sort((a, b) => a - b), [1, 2, 3, 4]);
+    assert.deepEqual([...inline.covered].sort((a, b) => a - b), [1, 2, 3, 4]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('computeDiffCoverage: added executable lines only, unimported files count as uncovered', () => {
   const root = coverageRoot();
   try {

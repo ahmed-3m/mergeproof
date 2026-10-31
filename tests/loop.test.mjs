@@ -330,7 +330,7 @@ test('runProcess stops a child that outlives timeoutMs and says so', () => {
 });
 
 test('the CLI knows loop and marks it agent-container-only in the usage', () => {
-  assert.match(USAGE, /mergeproof loop --harness <claude\|gemini\|agy>/);
+  assert.match(USAGE, /mergeproof loop --harness <claude\|gemini\|agy\|opencode>/);
   assert.match(USAGE, /agent container only; never the gate/);
   assert.equal(typeof main, 'function');
 });

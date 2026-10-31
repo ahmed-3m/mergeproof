@@ -66,7 +66,7 @@ function typeOf(v) {
 // A login → trust-bucket part (an `agent` or `model` name): machine-shaped and
 // bounded, because these strings flow into verdict files, comments and the
 // ledger, and a login with an identity is exactly as privileged as the flags.
-const IDENT_PART = /^[A-Za-z0-9._@/+-]{1,100}$/;
+const IDENT_PART = /^[A-Za-z0-9._@/+:#-]{1,100}$/;
 const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(?:\[bot\])?$/;
 
 /**
@@ -91,7 +91,7 @@ function validateIdentities(value, path, fail) {
     }
     for (const part of ['agent', 'model']) {
       if (typeof identity[part] !== 'string' || !IDENT_PART.test(identity[part])) {
-        fail(`"${at}.${part}" must be 1-100 characters of A-Za-z0-9._@/+-`);
+        fail(`"${at}.${part}" must be 1-100 characters of A-Za-z0-9._@/+:#-`);
       }
     }
     out[login] = { agent: identity.agent, model: identity.model };

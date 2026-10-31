@@ -103,15 +103,22 @@ function lineSpans(text) {
   }
 }
 
+// Leading whitespace and module-level `export [default]` syntax sit outside a
+// declared function's V8 range (which begins at `function` / `async function`),
+// so stripping them ensures an uncalled exported function line lies inside its
+// own count-0 range rather than the module's top-level range.
+const DECL_PREFIX = /^\s*(?:export\s+(?:default\s+)?)?/;
+const HAS_TOKEN = /[A-Za-z0-9_$]/;
+
 /**
  * The lines one V8 script entry executed. V8 reports a tree of ranges
  * (outer to inner); the top-level module range [0, source.length] has
  * count 1 for a file that was merely imported, while inner functions and
- * branches carry their own counts, 0 when never run. For every line the
- * INNERMOST range overlapping its content decides: a line whose innermost
- * range has count 0 (an uncalled function, an untaken branch) is uncovered,
- * however many outer ranges contain it. Counted per script entry and unioned
- * by the caller, so a line any test process executed is covered.
+ * branches carry their own counts, 0 when never run. Each line's code span is
+ * partitioned by the range boundaries overlapping it: the line is covered iff
+ * at least one code sub-span has an innermost enclosing range with count > 0
+ * (so an inline untaken branch like `if (x < 0) return -1;` does not hide the
+ * executed condition on the same line, while an uncalled function stays 0).
  */
 function coveredInScript(script, text) {
   const spans = lineSpans(text);
@@ -126,13 +133,37 @@ function coveredInScript(script, text) {
   const covered = new Set();
   if (ranges.length === 0) return covered;
   for (let line = 1; line <= spans.length; line++) {
-    const [ls, le] = spans[line - 1];
-    let inner = null; // the covering range that starts deepest: the innermost
+    let [ls, le] = spans[line - 1];
+    const prefix = DECL_PREFIX.exec(text.slice(ls, le));
+    if (prefix) ls += prefix[0].length;
+    while (le > ls && /\s/.test(text[le - 1])) le--;
+    if (ls >= le) continue;
+    const bounds = [ls, le];
+    const overlapping = [];
     for (const r of ranges) {
-      if (r[0] >= le || r[1] <= ls) continue; // no overlap with the line's content
-      if (inner === null || r[0] > inner[0] || (r[0] === inner[0] && r[1] < inner[1])) inner = r;
+      if (r[0] >= le || r[1] <= ls) continue;
+      overlapping.push(r);
+      if (r[0] > ls) bounds.push(r[0]);
+      if (r[1] < le) bounds.push(r[1]);
     }
-    if (inner !== null && inner[2] > 0) covered.add(line);
+    if (overlapping.length === 0) continue;
+    const pts = [...new Set(bounds)].sort((a, b) => a - b);
+    const lineHasToken = HAS_TOKEN.test(text.slice(ls, le));
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i];
+      const b = pts[i + 1];
+      const slice = text.slice(a, b);
+      if (slice.trim() === '' || (lineHasToken && !HAS_TOKEN.test(slice))) continue;
+      let inner = null;
+      for (const r of overlapping) {
+        if (r[0] > a || r[1] < b) continue;
+        if (inner === null || r[0] > inner[0] || (r[0] === inner[0] && r[1] < inner[1])) inner = r;
+      }
+      if (inner !== null && inner[2] > 0) {
+        covered.add(line);
+        break;
+      }
+    }
   }
   return covered;
 }

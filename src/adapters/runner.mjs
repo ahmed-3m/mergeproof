@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { chmodSync, closeSync, constants, fstatSync, mkdtempSync, openSync, readdirSync, readSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runProcess } from './process.mjs';
@@ -116,7 +116,7 @@ export function runTests(repoRoot, { testCommand, testFileCommand, only = null, 
     try {
       if (collectCoverage) {
         covDir = mkdtempSync(join(tmpdir(), 'mp-v8cov-'));
-        if (testUser) chmodSync(covDir, 0o777);
+        if (testUser) chmodSync(covDir, 0o1777);
       }
       const { ok, output } = run(repoRoot, testCommand, [], timeoutSec, testUser, covDir);
       (ok ? passed : failed).push(SUITE);
@@ -134,17 +134,38 @@ export function runTests(repoRoot, { testCommand, testFileCommand, only = null, 
   return { passed, failed };
 }
 
-// One parsed JSON blob per file the run left behind. A file that does not
-// parse (a torn write) is not a coverage result; an empty dir means the
-// runner produced none, and the coverage proof simply has nothing to read.
+const MAX_COV_FILE_BYTES = 32 * 1024 * 1024;
+const MAX_COV_TOTAL_BYTES = 128 * 1024 * 1024;
+const OPEN_COV_FLAGS = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
+
+// One parsed JSON blob per regular file the run left behind. Under --test-user
+// the directory is world-writable, so entries are opened with O_NOFOLLOW |
+// O_NONBLOCK, verified with fstatSync().isFile(), and capped in size so a
+// hostile test cannot plant a symlink, a blocking FIFO, or an OOM-sized blob.
 function readV8Coverage(dir) {
   const blobs = [];
+  let totalBytes = 0;
   for (const name of readdirSync(dir)) {
     if (!name.endsWith('.json')) continue;
+    let fd = null;
     try {
-      blobs.push(JSON.parse(readFileSync(join(dir, name), 'utf8')));
+      fd = openSync(join(dir, name), OPEN_COV_FLAGS);
+      const st = fstatSync(fd);
+      if (!st.isFile() || st.size <= 0 || st.size > MAX_COV_FILE_BYTES || totalBytes + st.size > MAX_COV_TOTAL_BYTES) continue;
+      const buf = Buffer.allocUnsafe(st.size);
+      const bytesRead = readSync(fd, buf, 0, st.size, 0);
+      totalBytes += bytesRead;
+      blobs.push(JSON.parse(buf.subarray(0, bytesRead).toString('utf8')));
     } catch {
-      // a torn write is not a coverage result
+      // a torn write, symlink, FIFO, or unreadable entry is not a coverage result
+    } finally {
+      if (fd !== null) {
+        try {
+          closeSync(fd);
+        } catch {
+          // ignore close errors
+        }
+      }
     }
   }
   return blobs;

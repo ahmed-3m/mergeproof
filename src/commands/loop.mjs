@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readlinkSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, posix, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseFlags } from '../args.mjs';
@@ -174,8 +174,13 @@ export function treeDigest(cwd, handoff) {
         } catch {
           entries.push(`${prefix ? `${prefix}/` : ''}${e.name}:<gone>`);
         }
+      } else if (e.isSymbolicLink()) {
+        try {
+          entries.push(`${prefix ? `${prefix}/` : ''}${e.name}->${readlinkSync(join(dir, e.name))}`);
+        } catch {
+          entries.push(`${prefix ? `${prefix}/` : ''}${e.name}-><gone>`);
+        }
       }
-      // Symlinks and other entry types are skipped: an edit lands in a file.
     }
   };
   walk(cwd, '');
