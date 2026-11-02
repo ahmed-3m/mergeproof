@@ -56,7 +56,9 @@ jobs:
 
           # The last notified tip lives in the most recent tracking issue's body
           # as an HTML marker: <!-- bridge-tip:<sha> -->. No separate state file.
-          last_body="$(gh issue list -R "$TARGET" --label "$LABEL" --state all \
+          # Read through BRIDGE_TOKEN: the target is private and this repo's own
+          # token has no visibility there.
+          last_body="$(GH_TOKEN="$BRIDGE_TOKEN" gh issue list -R "$TARGET" --label "$LABEL" --state all \
             --limit 20 --json number,createdAt,body --jq 'sort_by(.createdAt) | last | .body // ""')"
           marker="$(printf '%s' "$last_body" | grep -oE 'bridge-tip:[0-9a-f]{40}' | head -1 | cut -d: -f2 || true)"
 
@@ -67,9 +69,21 @@ jobs:
 
           if [ -n "$marker" ]; then
             range="$(printf '%s...%s' "$marker" "$tip")"
-            json="$(gh api "repos/$REPO/compare/$range")"
-            n="$(printf '%s' "$json" | jq '.ahead_by')"
-            list="$(printf '%s' "$json" | jq -r '.commits[] | "- \(.sha[0:7]) \(.commit.message | split("\n")[0]) (\(.commit.author.name))"')"
+            # The compare endpoint caps a page at 250 commits; page until a
+            # short page so no commit is dropped while bridge-tip advances.
+            collect_commits() {
+              local page=1 batch lines
+              while :; do
+                batch="$(gh api "repos/$REPO/compare/$range" -f page="$page" \
+                  --jq '.commits[] | "- \(.sha[0:7]) \(.commit.message | split("\n")[0]) (\(.commit.author.name))"')"
+                printf '%s\n' "$batch"
+                lines="$(printf '%s\n' "$batch" | grep -c . || true)"
+                [ "$lines" -lt 250 ] && break
+                page=$((page + 1))
+              done
+            }
+            n="$(gh api "repos/$REPO/compare/$range" --jq .ahead_by)"
+            list="$(collect_commits | sed '/^$/d')"
             heading="Upstream **$REPO** advanced \`${marker:0:7}…${tip:0:7}\` ($n commits)."
           else
             json="$(gh api "repos/$REPO/commits?sha=main&per_page=15")"
@@ -82,6 +96,12 @@ jobs:
           compare="$([ -n "$range" ] && printf 'Compare: https://github.com/%s/compare/%s\n\n' "$REPO" "$range" || true)"
           printf '<!-- bridge-tip:%s -->\n\n%s\n\n### New commits\n%s\n\n%s### Port checklist (mirql)\n- [ ] Triage: is a semantic port into `packages/mergeproof/**` warranted?\n- [ ] If yes: port with a red/green reproducer (`reproducer/manifest.json`, Law 16) so the Conscience Gate can verify causality\n- [ ] Land through the gate, referencing this issue\n- [ ] Close this issue with the verdict (ported / rejected, with reason)\n' \
             "$tip" "$heading" "$list" "$compare" > body.md
+
+          # Idempotent: if the label is missing in the target, create it; if it
+          # already exists, gh exits non-zero and we proceed.
+          GH_TOKEN="$BRIDGE_TOKEN" gh label create "$LABEL" -R "$TARGET" \
+            --color 5319e7 --description 'Upstream mergeproof change awaiting port into packages/mergeproof' \
+            >/dev/null 2>&1 || echo "label already present in $TARGET"
 
           GH_TOKEN="$BRIDGE_TOKEN" gh issue create -R "$TARGET" \
             --label "$LABEL" \

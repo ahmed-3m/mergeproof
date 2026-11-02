@@ -19,14 +19,18 @@
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const GATE_ENTRY = 'packages/mergeproof/index.mjs';
 export const MANIFEST_NAME = 'manifest.json';
 
-const RELATIVE_IMPORT_RE = /from\s+['"](\.[^'"]+)['"]/g;
+// Static `from './x'`, side-effect `import './x'` and dynamic
+// `import('./x')` specifiers, relative only — bare specifiers and node:
+// builtins are never bundle files. The prefix is required (not optional) so
+// plain string literals like "./data.txt" are never mistaken for imports.
+const RELATIVE_IMPORT_RE = /(?:from\s+|import\s*\(\s*|import\s+)['"](\.[^'"]+)['"]/g;
 
 /** Normalize any path to forward slashes for portable manifests. */
 export const toPosix = (p) => p.split(sep).join('/');
@@ -71,7 +75,12 @@ export function computeClosure({ root, entry = GATE_ENTRY }) {
       if (!resolved) {
         throw new Error(`unresolvable import "${match[1]}" in ${toPosix(relative(rootAbs, file))}`);
       }
-      if (resolved.startsWith(rootAbs + sep) && !seen.has(resolved)) {
+      if (!resolved.startsWith(rootAbs + sep)) {
+        throw new Error(
+          `import escapes the root: "${match[1]}" in ${toPosix(relative(rootAbs, file))} -> ${toPosix(resolved)}`,
+        );
+      }
+      if (!seen.has(resolved)) {
         seen.add(resolved);
         queue.push(resolved);
       }
@@ -98,7 +107,11 @@ function sourceCommit(rootAbs) {
 export function extractGate({ root, outDir, entry = GATE_ENTRY }) {
   const rootAbs = resolve(root);
   const outAbs = resolve(outDir);
+  // computeClosure completes (or throws) before anything is written, and the
+  // output directory starts empty so files removed upstream can never linger
+  // from a previous run.
   const files = computeClosure({ root: rootAbs, entry });
+  rmSync(outAbs, { recursive: true, force: true });
   mkdirSync(outAbs, { recursive: true });
   const recorded = [];
   for (const rel of files) {

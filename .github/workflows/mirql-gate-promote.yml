@@ -25,7 +25,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag (default: mirql-gate-<shortsha>)'
+        description: 'Release tag (default: mirql-gate-<shortsha>; [A-Za-z0-9._-] only)'
         required: false
       notes:
         description: 'Extra release notes line'
@@ -39,14 +39,39 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  guard:
+    # The bridge degrades to a green logged notice while unconfigured — same
+    # contract as mirql-upstream-watch. Runs first so the promote job (which
+    # needs the token to even check mirql out) can be skipped cleanly.
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      configured: ${{ steps.g.outputs.configured }}
+    steps:
+      - name: Check the bridge is configured
+        id: g
+        env:
+          TARGET: ${{ vars.MIRQL_TARGET_REPO }}
+          BRIDGE_TOKEN: ${{ secrets.MIRQL_BRIDGE_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TARGET" ] || [ -z "$BRIDGE_TOKEN" ]; then
+            echo '::notice::bridge unconfigured (MIRQL_TARGET_REPO variable / MIRQL_BRIDGE_TOKEN secret); promote skipped. See docs/mirql-bridge.md.'
+            echo 'configured=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'configured=true' >> "$GITHUB_OUTPUT"
+          fi
+
   promote:
+    needs: guard
+    if: needs.guard.outputs.configured == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout this repository (the extractor)
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Checkout mirql main (the gate source)
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ vars.MIRQL_TARGET_REPO }}
           token: ${{ secrets.MIRQL_BRIDGE_TOKEN }}
@@ -60,11 +85,19 @@ jobs:
 
       - name: Pack and checksum
         id: pack
+        env:
+          # Inputs and vars reach the shell ONLY through env — never through
+          # ${{ }} inside run:, which would interpolate them into the script.
+          TAG_INPUT: ${{ inputs.tag }}
         run: |
           set -euo pipefail
           short="$(git -C mirql-src rev-parse --short HEAD)"
-          tag="${{ inputs.tag }}"
+          tag="$TAG_INPUT"
           tag="${tag:-mirql-gate-$short}"
+          if ! printf '%s' "$tag" | grep -qE '^[A-Za-z0-9._-]+$'; then
+            echo "::error::tag '$tag' must match [A-Za-z0-9._-] only"
+            exit 1
+          fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           tar -czf "$tag.tgz" -C staging .
           sha256sum "$tag.tgz" > SHA256SUMS
@@ -75,15 +108,20 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.pack.outputs.tag }}
           NOTES: ${{ inputs.notes }}
+          TARGET_REPO: ${{ vars.MIRQL_TARGET_REPO }}
         run: |
           set -euo pipefail
           commit="$(jq -r .sourceCommit staging/manifest.json)"
           count="$(jq '.files | length' staging/manifest.json)"
-          body="$(printf 'Exported from `%s@%s` — %s files, graph-verified without execution.\n\nContents: `packages/mergeproof/**` plus its transitive `packages/core/**` imports, `manifest.json` with per-file SHA-256 digests and the source commit. Code only; no policies, keys or ledgers.\n' "${{ vars.MIRQL_TARGET_REPO }}" "$commit" "$count")"
+          body="$(printf 'Exported from `%s@%s` — %s files, graph-verified without execution.\n\nContents: `packages/mergeproof/**` plus its transitive `packages/core/**` imports, `manifest.json` with per-file SHA-256 digests and the source commit. Code only; no policies, keys or ledgers.\n' "$TARGET_REPO" "$commit" "$count")"
           if [ -n "$NOTES" ]; then body="$body"$'\n\n'"$NOTES"; fi
           if gh release view "$TAG" >/dev/null 2>&1; then
+            # Refresh the notes too: a reused custom tag must not keep stale
+            # notes when assets are replaced (the default tag pins to one
+            # source commit, so its notes are identical by construction).
             gh release upload "$TAG" "$TAG.tgz" SHA256SUMS --clobber
-            echo "Release $TAG already existed; artifacts re-uploaded."
+            gh release edit "$TAG" --notes "$body"
+            echo "Release $TAG already existed; artifacts re-uploaded, notes refreshed."
           else
             gh release create "$TAG" "$TAG.tgz" SHA256SUMS --title "$TAG" --notes "$body"
             echo "Release $TAG created."

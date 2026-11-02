@@ -16,7 +16,8 @@ const sha256 = (buf) => `sha256:${createHash('sha256').update(buf).digest('hex')
 
 function writeFixture(dir) {
   // A miniature mirql: entry -> a -> core.b -> core.c, a -> sub/index,
-  // core.c -> core.b closes a cycle, and pkg/ignored.mjs is unreachable.
+  // core.c -> core.b closes a cycle, a dynamically imports core/dyn, and
+  // pkg/ignored.mjs is unreachable.
   mkdirSync(join(dir, 'pkg', 'sub'), { recursive: true });
   mkdirSync(join(dir, 'core'), { recursive: true });
   const files = {
@@ -25,16 +26,20 @@ function writeFixture(dir) {
       "import { a } from './a.mjs';",
       "import { b } from '../core/b.mjs';",
       "import 'some-bare-package';",
+      "import './init.mjs';",
       'export const entry = () => [a, b, openSync];',
     ].join('\n'),
+    'pkg/init.mjs': 'export const booted = true;\n',
     'pkg/a.mjs': [
       "import { b } from '../core/b.mjs';",
       "import { sub } from './sub';",
-      'export const a = () => [b, sub];',
+      'export const loadDyn = () => import("../core/dyn.mjs");',
+      'export const a = () => [b, sub, loadDyn];',
     ].join('\n'),
     'pkg/sub/index.mjs': 'export const sub = 1;\n',
     'core/b.mjs': "import { c } from './c.mjs';\nexport const b = () => c;\n",
     'core/c.mjs': "import { b } from './b.mjs';\nexport const c = () => b;\n", // cycle b <-> c
+    'core/dyn.mjs': 'export const dyn = 1;\n',
     'pkg/ignored.mjs': 'export const ignored = true;\n',
   };
   for (const [rel, body] of Object.entries(files)) writeFileSync(join(dir, rel), body, 'utf8');
@@ -53,8 +58,10 @@ test('closure walks transitive relative imports and nothing else', () => {
     assert.deepEqual(closure, [
       'core/b.mjs',
       'core/c.mjs',
+      'core/dyn.mjs',
       'pkg/a.mjs',
       'pkg/entry.mjs',
+      'pkg/init.mjs',
       'pkg/sub/index.mjs',
     ]);
     assert.ok(!closure.includes('pkg/ignored.mjs'), 'unreachable files must be excluded');
@@ -67,8 +74,8 @@ test('closure walks transitive relative imports and nothing else', () => {
 test('import cycles terminate (each file visited once)', () => {
   const dir = tmpFixture('cycle');
   try {
-    // core/b <-> core/c closes a cycle; the walk must still finish with 5 files.
-    assert.equal(computeClosure({ root: dir, entry: 'pkg/entry.mjs' }).length, 5);
+    // core/b <-> core/c closes a cycle; the walk must still finish with 7 files.
+    assert.equal(computeClosure({ root: dir, entry: 'pkg/entry.mjs' }).length, 7);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -97,6 +104,41 @@ test('a missing gate entry fails closed with the path in the error', () => {
   }
 });
 
+test('an import that resolves outside the root fails closed', () => {
+  const base = mkdtempSync(join(tmpdir(), 'mp-bridge-escape-'));
+  try {
+    const dir = join(base, 'root');
+    const outside = join(base, 'outside.mjs');
+    mkdirSync(join(dir, 'pkg'), { recursive: true });
+    writeFileSync(outside, 'export const x = 1;\n', 'utf8');
+    writeFileSync(
+      join(dir, 'pkg', 'entry.mjs'),
+      "import { x } from '../../outside.mjs';\nexport const entry = x;\n",
+      'utf8',
+    );
+    assert.throws(
+      () => computeClosure({ root: dir, entry: 'pkg/entry.mjs' }),
+      /escapes the root/,
+    );
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('extraction starts from an empty output directory', () => {
+  const dir = tmpFixture('stale');
+  const out = mkdtempSync(join(tmpdir(), 'mp-bridge-stale-out-'));
+  try {
+    mkdirSync(join(out, 'pkg'), { recursive: true });
+    writeFileSync(join(out, 'pkg', 'stale-from-a-previous-run.mjs'), 'export const stale = 1;\n', 'utf8');
+    extractGate({ root: dir, outDir: out, entry: 'pkg/entry.mjs' });
+    assert.throws(() => readFileSync(join(out, 'pkg', 'stale-from-a-previous-run.mjs')), /ENOENT/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(out, { recursive: true, force: true });
+  }
+});
+
 test('extractGate copies the bundle byte-identically and records honest digests', () => {
   const dir = tmpFixture('extract');
   const out = mkdtempSync(join(tmpdir(), 'mp-bridge-out-'));
@@ -104,7 +146,7 @@ test('extractGate copies the bundle byte-identically and records honest digests'
     const manifest = extractGate({ root: dir, outDir: out, entry: 'pkg/entry.mjs' });
     assert.equal(manifest.entry, 'pkg/entry.mjs');
     assert.equal(manifest.sourceCommit, null, 'a non-git fixture records null, not a guess');
-    assert.equal(manifest.files.length, 5);
+    assert.equal(manifest.files.length, 7);
     for (const file of manifest.files) {
       const buf = readFileSync(join(out, file.path));
       assert.equal(digest(buf), file.sha256);
@@ -123,7 +165,7 @@ test('verifyBundleGraph passes on a complete bundle and fails when a file is rem
   const out = mkdtempSync(join(tmpdir(), 'mp-bridge-verify-out-'));
   try {
     extractGate({ root: dir, outDir: out, entry: 'pkg/entry.mjs' });
-    assert.equal(verifyBundleGraph(out).length, 5);
+    assert.equal(verifyBundleGraph(out).length, 7);
 
     // Break the graph: pkg/a.mjs imports ./sub, so deleting sub/index.mjs
     // must be caught without executing any bundle code.
