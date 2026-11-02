@@ -107,6 +107,15 @@ function sourceCommit(rootAbs) {
 export function extractGate({ root, outDir, entry = GATE_ENTRY }) {
   const rootAbs = resolve(root);
   const outAbs = resolve(outDir);
+  // The output directory is wiped before extraction, so it must never be the
+  // source root or overlap it in either direction: `--out .` would delete the
+  // checkout being read, and an `--out` containing the root (e.g. the home
+  // directory) would delete far more. Fail before anything is touched.
+  if (outAbs === rootAbs || outAbs.startsWith(rootAbs + sep) || rootAbs.startsWith(outAbs + sep)) {
+    throw new Error(
+      `refusing --out ${toPosix(outAbs)}: it must not be, contain, or sit inside the source root ${toPosix(rootAbs)}`,
+    );
+  }
   // computeClosure completes (or throws) before anything is written, and the
   // output directory starts empty so files removed upstream can never linger
   // from a previous run.

@@ -139,6 +139,26 @@ test('extraction starts from an empty output directory', () => {
   }
 });
 
+test('an output directory overlapping the source root is refused, and nothing is deleted', () => {
+  const base = mkdtempSync(join(tmpdir(), 'mp-bridge-outguard-'));
+  try {
+    const root = join(base, 'root'); // the source checkout lives INSIDE base
+    mkdirSync(root, { recursive: true });
+    writeFixture(root);
+    // `--out .` (out IS the root): the most dangerous manual misuse.
+    assert.throws(() => extractGate({ root, outDir: root, entry: 'pkg/entry.mjs' }), /refusing --out/);
+    // out inside the root (pollutes the source tree).
+    assert.throws(() => extractGate({ root, outDir: join(root, 'staging'), entry: 'pkg/entry.mjs' }), /refusing --out/);
+    // out containing the root (would delete everything above the source,
+    // including the source itself).
+    assert.throws(() => extractGate({ root, outDir: base, entry: 'pkg/entry.mjs' }), /refusing --out/);
+    // The guard fires before any deletion: the source fixture is intact.
+    assert.ok(readFileSync(join(root, 'pkg', 'entry.mjs'), 'utf8').includes('export const entry'));
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test('extractGate copies the bundle byte-identically and records honest digests', () => {
   const dir = tmpFixture('extract');
   const out = mkdtempSync(join(tmpdir(), 'mp-bridge-out-'));
