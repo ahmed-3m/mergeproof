@@ -1,0 +1,110 @@
+# mirql upstream watch — one direction of the mirql bridge.
+#
+# When this repository's main advances, open a tracking issue in the mirql
+# repository (the private factory that carries the gate forward) so the change
+# can be triaged and ported into its packages/mergeproof through mirql's own
+# review gate. This workflow only ever OPENS issues; it never writes code.
+#
+# Hand-maintained on purpose: it is NOT generated from templates/workflows by
+# scripts/promote.mjs — do not fold it into that pipeline.
+#
+# Setup (repository owner, once):
+#   1. actions variable MIRQL_TARGET_REPO — target repository slug (set).
+#   2. actions secret  MIRQL_BRIDGE_TOKEN — fine-grained PAT with
+#      "Issues: Read and write" on the target repository only.
+# See docs/mirql-bridge.md.
+
+name: mirql-upstream-watch
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mirql-upstream-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Open a tracking issue in mirql for new upstream commits
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BRIDGE_TOKEN: ${{ secrets.MIRQL_BRIDGE_TOKEN }}
+          TARGET: ${{ vars.MIRQL_TARGET_REPO }}
+          LABEL: 'upstream:mergeproof'
+        run: |
+          set -euo pipefail
+          if [ -z "$TARGET" ]; then
+            echo '::notice::MIRQL_TARGET_REPO variable is unset; nothing to watch for.'
+            exit 0
+          fi
+          if [ -z "$BRIDGE_TOKEN" ]; then
+            echo '::notice::MIRQL_BRIDGE_TOKEN secret is unset; cannot open issues in '"$TARGET"'. See docs/mirql-bridge.md.'
+            exit 0
+          fi
+
+          tip="$(gh api "repos/$REPO/commits/main" --jq .sha)"
+
+          # The last notified tip lives in the most recent tracking issue's body
+          # as an HTML marker: <!-- bridge-tip:<sha> -->. No separate state file.
+          # Read through BRIDGE_TOKEN: the target is private and this repo's own
+          # token has no visibility there.
+          last_body="$(GH_TOKEN="$BRIDGE_TOKEN" gh issue list -R "$TARGET" --label "$LABEL" --state all \
+            --limit 20 --json number,createdAt,body --jq 'sort_by(.createdAt) | last | .body // ""')"
+          marker="$(printf '%s' "$last_body" | grep -oE 'bridge-tip:[0-9a-f]{40}' | head -1 | cut -d: -f2 || true)"
+
+          if [ -n "$marker" ] && [ "$marker" = "$tip" ]; then
+            echo "mirql already notified about $tip; nothing to do."
+            exit 0
+          fi
+
+          if [ -n "$marker" ]; then
+            range="$(printf '%s...%s' "$marker" "$tip")"
+            # The compare endpoint caps a page at 250 commits; page until a
+            # short page so no commit is dropped while bridge-tip advances.
+            collect_commits() {
+              local page=1 batch lines
+              while :; do
+                batch="$(gh api "repos/$REPO/compare/$range" -f page="$page" \
+                  --jq '.commits[] | "- \(.sha[0:7]) \(.commit.message | split("\n")[0]) (\(.commit.author.name))"')"
+                printf '%s\n' "$batch"
+                lines="$(printf '%s\n' "$batch" | grep -c . || true)"
+                [ "$lines" -lt 250 ] && break
+                page=$((page + 1))
+              done
+            }
+            n="$(gh api "repos/$REPO/compare/$range" --jq .ahead_by)"
+            list="$(collect_commits | sed '/^$/d')"
+            heading="Upstream **$REPO** advanced \`${marker:0:7}…${tip:0:7}\` ($n commits)."
+          else
+            json="$(gh api "repos/$REPO/commits?sha=main&per_page=15")"
+            n="$(printf '%s' "$json" | jq 'length')"
+            list="$(printf '%s' "$json" | jq -r '.[] | "- \(.sha[0:7]) \(.commit.message | split("\n")[0]) (\(.commit.author.name))"')"
+            heading="Upstream **$REPO** is at \`${tip:0:7}\` (first bridge run — showing the last $n commits)."
+            range=''
+          fi
+
+          compare="$([ -n "$range" ] && printf 'Compare: https://github.com/%s/compare/%s\n\n' "$REPO" "$range" || true)"
+          printf '<!-- bridge-tip:%s -->\n\n%s\n\n### New commits\n%s\n\n%s### Port checklist (mirql)\n- [ ] Triage: is a semantic port into `packages/mergeproof/**` warranted?\n- [ ] If yes: port with a red/green reproducer (`reproducer/manifest.json`, Law 16) so the Conscience Gate can verify causality\n- [ ] Land through the gate, referencing this issue\n- [ ] Close this issue with the verdict (ported / rejected, with reason)\n' \
+            "$tip" "$heading" "$list" "$compare" > body.md
+
+          # Idempotent: if the label is missing in the target, create it; if it
+          # already exists, gh exits non-zero and we proceed.
+          GH_TOKEN="$BRIDGE_TOKEN" gh label create "$LABEL" -R "$TARGET" \
+            --color 5319e7 --description 'Upstream mergeproof change awaiting port into packages/mergeproof' \
+            >/dev/null 2>&1 || echo "label already present in $TARGET"
+
+          GH_TOKEN="$BRIDGE_TOKEN" gh issue create -R "$TARGET" \
+            --label "$LABEL" \
+            --title "upstream mergeproof: $n new commits (${tip:0:7})" \
+            --body-file body.md
+          echo "Opened a tracking issue in $TARGET for $range."
