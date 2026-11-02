@@ -1,0 +1,90 @@
+# mirql gate promote — the other direction of the mirql bridge.
+#
+# Exports mirql's zero-dependency gate (packages/mergeproof plus the
+# packages/core modules it transitively imports) as a verified, self-contained
+# bundle and attaches it to a GitHub Release in this repository. mirql's gate
+# has evolved beyond this repo's src/ (phi ratchets, verified reproducers,
+# binding breakers); releases carry that evolution forward publicly.
+#
+# The bundle is code-only: policies, keys, ledgers and constitutions never
+# leave mirql — the extractor walks relative imports from the gate entry and
+# fails closed on anything unresolvable. The graph is verified WITHOUT
+# executing any bundle code (no supply-chain execution of extracted code).
+#
+# Hand-maintained on purpose: NOT generated from templates/workflows.
+#
+# Setup (repository owner, once):
+#   1. actions variable MIRQL_TARGET_REPO — mirql repository slug (set).
+#   2. actions secret  MIRQL_BRIDGE_TOKEN — fine-grained PAT with
+#      "Contents: Read-only" AND "Issues: Read and write" on mirql only.
+# See docs/mirql-bridge.md.
+
+name: mirql-gate-promote
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (default: mirql-gate-<shortsha>)'
+        required: false
+      notes:
+        description: 'Extra release notes line'
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mirql-gate-promote
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout this repository (the extractor)
+        uses: actions/checkout@v4
+
+      - name: Checkout mirql main (the gate source)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.MIRQL_TARGET_REPO }}
+          token: ${{ secrets.MIRQL_BRIDGE_TOKEN }}
+          path: mirql-src
+          fetch-depth: 1
+
+      - name: Extract and verify the gate bundle
+        run: |
+          set -euo pipefail
+          node scripts/mirql-bridge/extract-gate.mjs --root mirql-src --out staging
+
+      - name: Pack and checksum
+        id: pack
+        run: |
+          set -euo pipefail
+          short="$(git -C mirql-src rev-parse --short HEAD)"
+          tag="${{ inputs.tag }}"
+          tag="${tag:-mirql-gate-$short}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          tar -czf "$tag.tgz" -C staging .
+          sha256sum "$tag.tgz" > SHA256SUMS
+          echo "bundle: $(tar -tzf "$tag.tgz" | wc -l) entries, $(du -h "$tag.tgz" | cut -f1)"
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.pack.outputs.tag }}
+          NOTES: ${{ inputs.notes }}
+        run: |
+          set -euo pipefail
+          commit="$(jq -r .sourceCommit staging/manifest.json)"
+          count="$(jq '.files | length' staging/manifest.json)"
+          body="$(printf 'Exported from `%s@%s` — %s files, graph-verified without execution.\n\nContents: `packages/mergeproof/**` plus its transitive `packages/core/**` imports, `manifest.json` with per-file SHA-256 digests and the source commit. Code only; no policies, keys or ledgers.\n' "${{ vars.MIRQL_TARGET_REPO }}" "$commit" "$count")"
+          if [ -n "$NOTES" ]; then body="$body"$'\n\n'"$NOTES"; fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$TAG.tgz" SHA256SUMS --clobber
+            echo "Release $TAG already existed; artifacts re-uploaded."
+          else
+            gh release create "$TAG" "$TAG.tgz" SHA256SUMS --title "$TAG" --notes "$body"
+            echo "Release $TAG created."
+          fi
