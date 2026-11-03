@@ -78,9 +78,9 @@ runs:
         # summary file may be unavailable outside Actions; then output stays
         # in the job log — display must never decide an outcome.
         target=''
-        if [ "$MERGEPROOF_SUMMARY" = 'true' ] && [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+        if [ "${MERGEPROOF_SUMMARY:-}" = 'true' ] && [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
           target="$GITHUB_STEP_SUMMARY"
-        elif [ "$MERGEPROOF_SUMMARY" = 'true' ]; then
+        elif [ "${MERGEPROOF_SUMMARY:-}" = 'true' ]; then
           echo '::notice::summary requested but GITHUB_STEP_SUMMARY is unset; output stays in the job log' >&2
         fi
         code=0

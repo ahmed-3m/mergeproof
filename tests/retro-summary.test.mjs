@@ -69,8 +69,11 @@ test("the action's run block appends to the summary only when summary is enabled
   // Inside the run script itself, no caller value is interpolated.
   const script = block.slice(block.indexOf('run: |'));
   assert.doesNotMatch(script, /\$\{\{/);
-  // The redirect is guarded: summary file present AND summary enabled.
-  assert.match(block, /MERGEPROOF_SUMMARY" = 'true' \] && \[ -n "\$\{GITHUB_STEP_SUMMARY:-\}" \]/);
+  // The redirect is guarded: summary enabled AND file present, and the
+  // variable reads are set-u safe (the block runs under set -euo pipefail
+  // even when a caller omits the input entirely).
+  assert.match(block, /MERGEPROOF_SUMMARY:-}" = 'true' \] && \[ -n "\$\{GITHUB_STEP_SUMMARY:-\}" \]/);
+  assert.doesNotMatch(block, /[^{:-]\bMERGEPROOF_SUMMARY"/);
   assert.match(block, />> "\$target"/);
   // Output stays in the log when the summary file is unavailable; a notice
   // says so honestly instead of failing the step.
