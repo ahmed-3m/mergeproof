@@ -44,7 +44,7 @@ const git = (args, cwd, opts = {}) => {
 };
 
 /** Run the verbatim push step inside `cloneDir` (env supplies the variables). */
-function runPushStep(cloneDir, tmpDir, timeoutMs = 120000) {
+function runPushStep(cloneDir, tmpDir, { timeoutMs = 120000, dates } = {}) {
   // The runner pre-creates RUNNER_TEMP; a sandbox must do it itself.
   mkdirSync(tmpDir, { recursive: true });
   return runProcess('bash', ['-c', PUSH_STEP], {
@@ -52,6 +52,7 @@ function runPushStep(cloneDir, tmpDir, timeoutMs = 120000) {
     timeoutMs,
     env: {
       ...process.env,
+      ...(dates ? { GIT_AUTHOR_DATE: dates, GIT_COMMITTER_DATE: dates } : {}),
       LEDGER_DIR: join(cloneDir, '.mergeproof-ledger'),
       LEDGER_BRANCH: 'mergeproof-ledger',
       RUNNER_TEMP: tmpDir,
@@ -241,15 +242,23 @@ test('a retry whose union leaves nothing new is a no-op success', () => {
     const [a, b] = clones;
     // Both clones record byte-identical landings. B pushes first; A's push
     // is rejected, and after the union nothing of A's is new — success, not
-    // a "nothing to commit" failure.
+    // a "nothing to commit" failure. Pinned commit dates keep the two
+    // commits distinct SHAs on every filesystem speed: on a fast runner the
+    // identical trees would otherwise collide into the SAME commit (same
+    // tree, parent, author and second), A's push would be an instant
+    // "Everything up-to-date" and never exercise the union at all.
     const landing = [{ id: '21:aaaa:1', pr: 21, verdict: 'MERGE' }, { pr: 21, status: 'open' }];
     stageLanding(b, ...landing);
     stageLanding(a, ...landing);
-    const resB = runPushStep(b, join(base, 'tmp-b'));
+    const resB = runPushStep(b, join(base, 'tmp-b'), { dates: '2005-04-07T22:13:13Z' });
     assert.equal(resB.code, 0, `push in B failed: ${resB.stderr}`);
-    const resA = runPushStep(a, join(base, 'tmp-a'));
+    const resA = runPushStep(a, join(base, 'tmp-a'), { dates: '2020-01-01T00:00:00Z' });
     assert.equal(resA.code, 0, `no-op push failed: ${resA.stderr}`);
-    assert.match(resA.stdout, /already carries everything/, 'the no-op path says so');
+    assert.match(
+      resA.stdout,
+      /already carries everything/,
+      `the no-op path says so (stdout=${JSON.stringify(resA.stdout)} stderr=${JSON.stringify(resA.stderr)})`,
+    );
 
     git(['fetch', 'origin', 'mergeproof-ledger'], a);
     const events = git(['show', 'FETCH_HEAD:events.jsonl'], a).stdout;
