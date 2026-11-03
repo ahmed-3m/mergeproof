@@ -14,6 +14,7 @@ on:
 permissions:
   contents: write # move the v1 tag and create the GitHub Release
   id-token: write # npm provenance (optional; the plain publish is the fallback)
+  workflows: write # moving v1 onto a release that changes .github/workflows (v0.3.0 was rejected without it: "refusing to allow a GitHub App to create or update workflow …")
 
 jobs:
   release:
