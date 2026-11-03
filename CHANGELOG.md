@@ -7,6 +7,10 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Changed
 - This repo runs v0.3.0: `.github/workflows/mergeproof-{issue,pr,sync,roadmap}.yml` and `.mergeproof/skills/` regenerate at the v0.3.0 commit (`scripts/promote.mjs` pins them to the release) — the installed PR workflow now records `--events .mergeproof-ledger/events.jsonl` on apply and union-merges the log on the ledger push, the nightly sync runs `retro` with `summary: 'true'` so the table lands in the run summary, and skills v4 is promoted with the new `mergeproof-refactor@1` and `mergeproof-docs@1` under `.mergeproof/skills/`.
 
+### Fixed
+
+- The release workflow finishes the release even when it cannot move `v1` itself: a release whose tree changes `.github/workflows/` (any release after a promote) has its v1 push rejected — GITHUB_TOKEN has no scope for workflow-changing pushes, and the v0.2.0 move had only passed because its tag commit left the workflows untouched. v0.3.0's run died at that step before creating the Release (the tag was moved by hand and the run re-executed green). The workflow now creates the Release first and degrades the v1 move to a warning carrying the exact hand command, documented in `docs/releasing.md`.
+
 ## [0.3.0] - 2026-11-03
 
 ### Added

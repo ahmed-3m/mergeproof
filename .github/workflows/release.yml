@@ -51,12 +51,6 @@ jobs:
               exit 1
             fi
           }
-      - name: Move the v1 tag (the action templates reference ahmed-3m/mergeproof@v1)
-        run: |
-          set -euo pipefail
-          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-            tag -fa v1 -m "v1 tracks the latest release"
-          git push origin v1 --force
       - name: Create the GitHub Release from the changelog section
         env:
           GH_TOKEN: ${{ github.token }}
@@ -77,4 +71,17 @@ jobs:
           # a silent skip would hide a broken release.
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --title "$TAG" --notes "$notes"
+          fi
+
+      # Before the v1 move: a release whose tree changes .github/workflows
+      # cannot move v1 with GITHUB_TOKEN (no scope grants workflow-changing
+      # pushes), so this step may legitimately fail — the Release must land first.
+      - name: Move the v1 tag (the action templates reference ahmed-3m/mergeproof@v1)
+        run: |
+          set -euo pipefail
+          if git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              tag -fa v1 -m "v1 tracks the latest release" && git push origin v1 --force; then
+            echo "v1 moved to ${GITHUB_REF_NAME}"
+          else
+            echo "::warning::could not move v1 with GITHUB_TOKEN (this release changed .github/workflows; no token scope grants that). Move it by hand: git tag -fa v1 -m 'v1 tracks the latest release' ${GITHUB_SHA} && git push origin v1 --force"
           fi

@@ -21,3 +21,11 @@ A release is a semver tag on `main`. [`.github/workflows/release.yml`](../.githu
 4. Check that `npm view @ahmed-3m/mergeproof version` shows the new version, and that the `v1` tag points at it.
 
 Re-running the release workflow for the same tag is safe: a version that is already published is tolerated, and the Release is created only when it is missing.
+
+If the workflow warns `could not move v1 with GITHUB_TOKEN` — any release after a promote, whose tree changes `.github/workflows/` — move the tag by hand (no GITHUB_TOKEN scope can do it; a PAT with the `workflow` scope could):
+
+```bash
+git fetch origin
+git tag -fa v1 -m "v1 tracks the latest release" <the-release-commit>
+git push origin v1 --force
+```
