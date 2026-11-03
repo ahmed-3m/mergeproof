@@ -53,6 +53,16 @@ jobs:
         with:
           command: sync
           args: --ledger .mergeproof-ledger/ledger.json
+      - name: Retro summary — mergeproof retro
+        # MP-110: the settled ledger's retro table lands in this run's summary
+        # tab. Read-only command; the action appends stdout to
+        # $GITHUB_STEP_SUMMARY when summary is 'true'. No new secret, and the
+        # workflow's permissions are unchanged.
+        uses: ahmed-3m/mergeproof@v1
+        with:
+          command: retro
+          args: --ledger .mergeproof-ledger/ledger.json
+          summary: 'true'
       - name: Commit and push the ledger
         env:
           LEDGER_BRANCH: mergeproof-ledger
