@@ -9,7 +9,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
-- The release workflow can move `v1` on its own again: the move needs the `workflows` permission whenever the new release's tree changes `.github/workflows/`. v0.3.0's move was rejected (`refusing to allow a GitHub App to create or update workflow … without workflows permission`) because the promote between v0.2.0 and v0.3.0 had changed the generated workflows — the v0.2.0 move had only passed because its tag commit left them untouched. The tag was moved by hand once and the run re-executed green (npm publish, `v1`, and the Release all landed); this permission makes the next release self-sufficient.
+- The release workflow finishes the release even when it cannot move `v1` itself: a release whose tree changes `.github/workflows/` (any release after a promote) has its v1 push rejected — GITHUB_TOKEN has no scope for workflow-changing pushes, and the v0.2.0 move had only passed because its tag commit left the workflows untouched. v0.3.0's run died at that step before creating the Release (the tag was moved by hand and the run re-executed green). The workflow now creates the Release first and degrades the v1 move to a warning carrying the exact hand command, documented in `docs/releasing.md`.
 
 ## [0.3.0] - 2026-11-03
 
