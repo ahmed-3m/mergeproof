@@ -10,10 +10,10 @@
 //    actual CLI and the retro table lands in the summary file byte-complete.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { runProcess } from '../src/adapters/process.mjs';
 
 // Read with newlines normalized: git may check the files out with CRLF on
 // Windows, and the structure assertions are newline-based.
@@ -137,10 +137,9 @@ fi
 echo "exit-code=\$code" >> "\$GITHUB_OUTPUT"
 exit "\$code"
 `;
-    const res = spawnSync('bash', ['-c', script], {
+    const res = runProcess('bash', ['-c', script], {
       cwd: resolve('.'),
-      encoding: 'buffer',
-      timeout: 30000,
+      timeoutMs: 30000,
       env: {
         ...process.env,
         MERGEPROOF_COMMAND: 'retro',
@@ -151,7 +150,7 @@ exit "\$code"
         GITHUB_OUTPUT: join(dir, 'output'),
       },
     });
-    assert.equal(res.status, 0, `bash script failed: ${res.stderr.toString()}`);
+    assert.equal(res.code, 0, `bash script failed: ${res.stderr}`);
     const written = readFileSync(summaryFile, 'utf8');
     assert.match(written, /Mergeproof retro/);
     assert.match(written, /claude-code/);
@@ -183,10 +182,9 @@ fi
 echo "exit-code=\$code" >> "\$GITHUB_OUTPUT"
 exit "\$code"
 `;
-    const res = spawnSync('bash', ['-c', script], {
+    const res = runProcess('bash', ['-c', script], {
       cwd: resolve('.'),
-      encoding: 'buffer',
-      timeout: 30000,
+      timeoutMs: 30000,
       env: {
         ...process.env,
         MERGEPROOF_COMMAND: 'retro',
@@ -197,9 +195,9 @@ exit "\$code"
         GITHUB_OUTPUT: join(dir, 'output'),
       },
     });
-    assert.equal(res.status, 0);
+    assert.equal(res.code, 0);
     assert.ok(!readFileIfExists(summaryFile), 'no summary file may be written');
-    assert.match(res.stdout.toString(), /Mergeproof retro/, 'output stays in the job log (stdout)');
+    assert.match(res.stdout, /Mergeproof retro/, 'output stays in the job log (stdout)');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
