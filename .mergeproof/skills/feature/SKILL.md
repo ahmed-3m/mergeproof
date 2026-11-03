@@ -1,6 +1,6 @@
 ---
 name: mergeproof-feature
-version: 3
+version: 4
 description: Use when you are the coding agent dispatched on a feature or enhancement issue in a repo gated by mergeproof and must land it as a pull request the gate can prove.
 ---
 
@@ -11,6 +11,12 @@ agent pull requests only with proof: new tests for the acceptance criteria
 that fail on the base code and pass with your implementation. Make that proof
 honest and the change small. Every rule in step 3 is tampering: instant
 `HUMAN`, no retry.
+
+If this repo has a `.mergeproof/lessons.md`, read it right after this skill,
+before you write anything: each line is a lesson past runs learned, with the
+pull requests that taught it. Apply every lesson that fits your feature.
+Never edit, add to or delete that file — the gate treats it as a human-only
+path, and an agent pull request that touches it is `HUMAN`, no retry.
 
 ## 1. Read the issue
 
@@ -28,9 +34,9 @@ honest and the change small. Every rule in step 3 is tampering: instant
 
 ## 2. Write the acceptance tests first
 
-1. Create a NEW test file under the repo's test paths, named after the
-   feature (for example `tests/issue-<n>-<slug>.test.mjs`) — never an
-   existing file.
+1. Create a NEW test file under the repo's test paths (`paths.tests` in
+   `.mergeproof.json`), named after the feature and following the repo's
+   existing test naming — never an existing file.
 2. Turn every acceptance criterion into a test. A criterion with no test is
    not implemented.
 3. Run just this file (the repo's `testFileCommand` from `.mergeproof.json`)
@@ -53,9 +59,11 @@ honest and the change small. Every rule in step 3 is tampering: instant
 - Never touch `.mergeproof.json`, anything under `.mergeproof/`, or anything
   under `.github/`. The gate reads its config from the base branch; a pull
   request may never configure its own judge.
-- Never change a manifest or a lockfile (`package.json`, lock files, …). That
-  reclassifies the pull request as `deps`, which always goes to a human. If
-  the feature needs a new dependency, stop (step 9).
+- Never change a dependency manifest or lockfile (package manifests,
+  lock files, requirements files, `go.mod`/`go.sum`, `Cargo.toml`/
+  `Cargo.lock`, …). That reclassifies the pull request as `deps`, which
+  always goes to a human. If the feature needs a new dependency, stop
+  (step 9).
 - Keep the whole diff under `limits.maxDiffLines` from `.mergeproof.json`
   (default 300 added plus deleted lines; lockfiles don't count, but you
   should have none). If it doesn't fit, stop (step 9).
@@ -71,15 +79,16 @@ honest and the change small. Every rule in step 3 is tampering: instant
 
 1. Write the smallest implementation that passes every new test — nothing
    beyond the criteria. No drive-by refactors or speculative surface.
-2. Run the full suite (the repo's `testCommand`, `npm test` by default). Fix
-   anything you broke.
+2. Run the full suite (the repo's `testCommand` from `.mergeproof.json`).
+   Fix anything you broke.
 3. Re-read your diff for strays: debug prints, scratch files, editor config,
    formatter churn on lines you didn't mean to touch.
 
 ## 5. Run the local gate
 
-1. Run `npx @ahmed-3m/mergeproof check --local` on your branch. It replays the
-   real gate on HEAD against its base and never merges, comments or writes.
+1. Run `mergeproof check --local` on your branch (however this repo invokes
+   mergeproof — the harness knows). It replays the real gate on HEAD against
+   its base and never merges, comments or writes.
 2. Read the one-line verdict and its notes (at most 3, failures first):
    - `MERGE` (exit 0): the proof holds. Go to step 6.
    - `RETRY` (exit 3): weak proof, fixable — suite red, a new test passes on
@@ -127,11 +136,11 @@ honest and the change small. Every rule in step 3 is tampering: instant
    - `<path>`: <what and why>
 
    ## New test(s) and why they fail on base
-   - `tests/<file>`: asserts <acceptance criteria covered>.
+   - `<new test file path>`: asserts <acceptance criteria covered>.
      Fails on base because the feature does not exist yet.
 
    ## Local gate verdict
-   `npx @ahmed-3m/mergeproof check --local` → <VERDICT> (kind: feature).
+   `mergeproof check --local` → <VERDICT> (kind: feature).
    Notes: <notes, or none>.
 
    ## Critic findings and how they were addressed
