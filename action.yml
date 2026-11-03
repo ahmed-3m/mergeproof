@@ -17,6 +17,10 @@ inputs:
     description: 'Arguments for the command, space-separated. Passed through the environment and split without shell expansion.'
     required: false
     default: ''
+  summary:
+    description: 'Append the command output to $GITHUB_STEP_SUMMARY (for read-only display commands like retro).'
+    required: false
+    default: 'false'
   node-version:
     description: 'Node.js version to set up (>= 18.17)'
     required: false
@@ -59,6 +63,9 @@ runs:
         # args arrive through the environment, never through ${{ }} inside a
         # run: script, so nothing they contain can be executed by a shell.
         MERGEPROOF_ARGS: ${{ inputs.args }}
+        # summary is caller-controlled ('true'/'false' from the workflow
+        # author) and read from the environment for the same reason as args.
+        MERGEPROOF_SUMMARY: ${{ inputs.summary }}
       run: |
         set -euo pipefail
         # Split args into words with globbing off: no variable, glob or
@@ -67,8 +74,21 @@ runs:
         set -f
         read -r -d '' -a argv <<< "$MERGEPROOF_ARGS" || true
         set +f
+        # summary: 'true' appends stdout to the run summary (MP-110). The
+        # summary file may be unavailable outside Actions; then output stays
+        # in the job log — display must never decide an outcome.
+        target=''
+        if [ "${MERGEPROOF_SUMMARY:-}" = 'true' ] && [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+          target="$GITHUB_STEP_SUMMARY"
+        elif [ "${MERGEPROOF_SUMMARY:-}" = 'true' ]; then
+          echo '::notice::summary requested but GITHUB_STEP_SUMMARY is unset; output stays in the job log' >&2
+        fi
         code=0
-        node "$GITHUB_ACTION_PATH/bin/mergeproof.mjs" "$MERGEPROOF_COMMAND" "${argv[@]}" || code=$?
+        if [ -n "$target" ]; then
+          node "$GITHUB_ACTION_PATH/bin/mergeproof.mjs" "$MERGEPROOF_COMMAND" "${argv[@]}" >> "$target" || code=$?
+        else
+          node "$GITHUB_ACTION_PATH/bin/mergeproof.mjs" "$MERGEPROOF_COMMAND" "${argv[@]}" || code=$?
+        fi
         # Workflows branch on the verdict: continue-on-error the step and read
         # this output instead of guessing from failure/success.
         echo "exit-code=$code" >> "$GITHUB_OUTPUT"
