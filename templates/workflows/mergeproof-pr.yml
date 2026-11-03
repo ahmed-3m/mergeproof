@@ -313,7 +313,11 @@ jobs:
           # newest ledger and retry: a git rebase would conflict on the JSON.
           ours="$RUNNER_TEMP/ledger.ours.json"
           base="$RUNNER_TEMP/ledger.base.json"
-          cp "$LEDGER_DIR/ledger.json" "$ours"
+          # An event-only landing (an unproven RETRY/HUMAN on a fresh install,
+          # where land() writes no ledger entry) dirties only events.jsonl; a
+          # missing ledger.json is an empty ledger, not a failure.
+          cp "$LEDGER_DIR/ledger.json" "$ours" 2>/dev/null \
+            || printf '{"schema":"mergeproof-ledger@1","outcomes":[]}' > "$ours"
           git -C "$LEDGER_DIR" show HEAD:ledger.json > "$base" 2>/dev/null || echo '{"outcomes":[]}' > "$base"
           # The events log is saved aside too (MP-108): after a lost push the
           # worktree is reset to the remote and this run's records are
@@ -325,6 +329,12 @@ jobs:
             : > "$ours_events"
           fi
           for try in 1 2 3 4 5; do
+            # A lost race whose union left nothing new (the remote already has
+            # every record this run produced) is success, not a commit failure.
+            if [ -z "$(git -C "$LEDGER_DIR" status --porcelain)" ]; then
+              echo "Ledger already carries everything this run recorded."
+              exit 0
+            fi
             git -C "$LEDGER_DIR" add -A
             git -C "$LEDGER_DIR" -c user.name='github-actions[bot]' \
               -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
@@ -343,7 +353,11 @@ jobs:
               const read = (p) => JSON.parse(fs.readFileSync(p, "utf8"));
               const seen = new Set(read(basePath).outcomes.map((o) => JSON.stringify(o)));
               const fresh = read(oursPath).outcomes.filter((o) => !seen.has(JSON.stringify(o)));
-              const ledger = read(ledgerPath);
+              // The remote may not have a ledger.json yet (event-only first
+              // landing): merge into an empty one rather than failing.
+              const ledger = fs.existsSync(ledgerPath)
+                ? read(ledgerPath)
+                : { schema: "mergeproof-ledger@1", outcomes: [] };
               const there = new Set(ledger.outcomes.map((o) => JSON.stringify(o)));
               for (const o of fresh.filter((x) => !there.has(JSON.stringify(x)))) {
                 ledger.outcomes = ledger.outcomes.filter((x) => !(x.pr === o.pr && x.status === "open"));
