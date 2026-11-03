@@ -4,6 +4,9 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Changed
+- This repo runs v0.3.0: `.github/workflows/mergeproof-{issue,pr,sync,roadmap}.yml` and `.mergeproof/skills/` regenerate at the v0.3.0 commit (`scripts/promote.mjs` pins them to the release) — the installed PR workflow now records `--events .mergeproof-ledger/events.jsonl` on apply and union-merges the log on the ledger push, the nightly sync runs `retro` with `summary: 'true'` so the table lands in the run summary, and skills v4 is promoted with the new `mergeproof-refactor@1` and `mergeproof-docs@1` under `.mergeproof/skills/`.
+
 ## [0.3.0] - 2026-11-03
 
 ### Added
