@@ -286,6 +286,7 @@ jobs:
             --attempt ${{ needs.context.outputs.attempt }}
             ${{ needs.context.outputs.issue-args }}
             --ledger .mergeproof-ledger/ledger.json
+            --events .mergeproof-ledger/events.jsonl
       - name: Fail on apply's own errors (exit 1 or 2)
         if: steps.apply.outputs.exit-code != '0' && steps.apply.outputs.exit-code != '3' && steps.apply.outputs.exit-code != '4'
         env:
@@ -314,6 +315,15 @@ jobs:
           base="$RUNNER_TEMP/ledger.base.json"
           cp "$LEDGER_DIR/ledger.json" "$ours"
           git -C "$LEDGER_DIR" show HEAD:ledger.json > "$base" 2>/dev/null || echo '{"outcomes":[]}' > "$base"
+          # The events log is saved aside too (MP-108): after a lost push the
+          # worktree is reset to the remote and this run's records are
+          # union-merged back by id before the retry.
+          ours_events="$RUNNER_TEMP/events.ours.jsonl"
+          if [ -f "$LEDGER_DIR/events.jsonl" ]; then
+            cp "$LEDGER_DIR/events.jsonl" "$ours_events"
+          else
+            : > "$ours_events"
+          fi
           for try in 1 2 3 4 5; do
             git -C "$LEDGER_DIR" add -A
             git -C "$LEDGER_DIR" -c user.name='github-actions[bot]' \
@@ -329,7 +339,7 @@ jobs:
             # first) is never overwritten or doubled, so the push fails.
             node -e '
               const fs = require("fs");
-              const [oursPath, basePath, ledgerPath] = process.argv.slice(1);
+              const [oursPath, basePath, ledgerPath, oursEventsPath, eventsPath] = process.argv.slice(1);
               const read = (p) => JSON.parse(fs.readFileSync(p, "utf8"));
               const seen = new Set(read(basePath).outcomes.map((o) => JSON.stringify(o)));
               const fresh = read(oursPath).outcomes.filter((o) => !seen.has(JSON.stringify(o)));
@@ -344,7 +354,28 @@ jobs:
                 ledger.outcomes.push(o);
               }
               fs.writeFileSync(ledgerPath, JSON.stringify(ledger, null, 2) + "\n");
-            ' "$ours" "$base" "$LEDGER_DIR/ledger.json"
+              // MP-108: union-merge events.jsonl by id. The remote copy wins
+              // for ids it already has (a stale push never rewrites a landed
+              // record); records only this clone has are appended in local
+              // order. A malformed line throws and fails the step: corrupt
+              // input never lands on the ledger branch.
+              const lines = (p) => (fs.existsSync(p)
+                ? fs.readFileSync(p, "utf8").split("\n").filter((l) => l.trim() !== "")
+                : []);
+              const keyOf = (l) => {
+                const rec = JSON.parse(l);
+                return rec && rec.id != null ? rec.id : l;
+              };
+              const mergedEvents = new Map();
+              for (const l of lines(eventsPath)) mergedEvents.set(keyOf(l), l);
+              for (const l of lines(oursEventsPath)) {
+                const k = keyOf(l);
+                if (!mergedEvents.has(k)) mergedEvents.set(k, l);
+              }
+              if (mergedEvents.size > 0) {
+                fs.writeFileSync(eventsPath, [...mergedEvents.values()].join("\n") + "\n");
+              }
+            ' "$ours" "$base" "$LEDGER_DIR/ledger.json" "$ours_events" "$LEDGER_DIR/events.jsonl"
           done
           echo "::error::could not push the ledger after 5 tries"
           exit 1
