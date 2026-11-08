@@ -19,6 +19,7 @@ A release is a semver tag on `main`. [`.github/workflows/release.yml`](../.githu
    ```
 
 4. Check that `npm view @ahmed-3m/mergeproof version` shows the new version, and that the `v1` tag points at it.
+5. **Publish the release to the GitHub Marketplace** (first publish, and every release the listing should move to). The workflow does not do this and the REST API cannot: in the web UI, open the release, click **Edit** (pencil), check **Publish this Action to the GitHub Marketplace**, confirm the metadata reads "Everything looks good", pick a primary category (mergeproof uses *Security*), and **Update release**. The listing name is the `name:` in `action.yml` (`mergeproof-gate`) and must be unique on the Marketplace — `mergeproof` is taken by an unrelated project. A release published without the checkbox leaves the listing pointing at the previous version.
 
 Re-running the release workflow for the same tag is safe: a version that is already published is tolerated, and the Release is created only when it is missing.
 

@@ -10,7 +10,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - Repo logo and brand assets under `assets/logo/` — the merge-gate mark (two branches merging into a verified node) as a light/dark SVG pair for the README header, the avatar tile, and raster exports (`logo-512.png`, `social-preview.png` 1280×640 for the repo social-preview upload).
 
 ### Changed
-- The GitHub Marketplace listing name is now `mergeproof-gate` — GitHub requires unique Marketplace names and an unrelated project (`Aryamanz29/mergeproof`, "evidence gate for pull requests") already lists `mergeproof`. The `name:` in `action.yml` is display-only for the listing; `uses: ahmed-3m/mergeproof@v1` is unaffected.
+- The GitHub Marketplace listing name is now `mergeproof-gate` — GitHub requires unique Marketplace names and an unrelated project (`Aryamanz29/mergeproof`, "evidence gate for pull requests") already lists `mergeproof`. The `name:` in `action.yml` is display-only for the listing; `uses: ahmed-3m/mergeproof@v1` is unaffected. `docs/releasing.md` gains step 5: the Marketplace publication is a separate web-UI step (no API can set it), and a release published without it leaves the listing at the previous version.
 - This repo runs v0.3.0: `.github/workflows/mergeproof-{issue,pr,sync,roadmap}.yml` and `.mergeproof/skills/` regenerate at the v0.3.0 commit (`scripts/promote.mjs` pins them to the release) — the installed PR workflow now records `--events .mergeproof-ledger/events.jsonl` on apply and union-merges the log on the ledger push, the nightly sync runs `retro` with `summary: 'true'` so the table lands in the run summary, and skills v4 is promoted with the new `mergeproof-refactor@1` and `mergeproof-docs@1` under `.mergeproof/skills/`.
 
 ### Fixed
