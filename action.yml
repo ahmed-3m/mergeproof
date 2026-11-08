@@ -1,4 +1,4 @@
-name: 'mergeproof'
+name: 'mergeproof-gate'
 description: >-
   Trust gate for AI-agent pull requests (zero dependencies, no LLM calls):
   `check` gates a pull request, `apply` lands a verdict a gate job wrote, and
