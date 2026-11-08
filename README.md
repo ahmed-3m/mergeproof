@@ -1,4 +1,11 @@
 <p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./assets/logo/logo-dark.svg">
+    <img src="./assets/logo/logo-light.svg" width="88" alt="mergeproof logo — two git branches merging into a green node carrying a check mark">
+  </picture>
+</p>
+
+<p align="center">
   <img src="./assets/readme/hero.svg" width="100%" alt="mergeproof — a trust gate for AI-agent pull requests with the verdicts MERGE, RETRY and HUMAN, next to a real gate run that refuses a bugfix PR for editing an existing test">
 </p>
 
