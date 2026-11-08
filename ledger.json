@@ -14,6 +14,20 @@
       "mergedAt": "2026-10-28T20:48:24Z",
       "mergeCommit": "e0ba08d1f1f3579f3de5c5564b766f409bb56ed7",
       "status": "pending"
+    },
+    {
+      "pr": 67,
+      "url": "https://github.com/ahmed-3m/mergeproof/pull/67",
+      "kind": "docs",
+      "agent": "claude-code",
+      "model": "claude-opus-5-5",
+      "skill": null,
+      "attempts": 1,
+      "verdict": "HUMAN",
+      "provenAt": "2026-11-08T11:36:12.562Z",
+      "mergedAt": null,
+      "mergeCommit": null,
+      "status": "open"
     }
   ]
 }
