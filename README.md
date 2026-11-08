@@ -1,8 +1,5 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="./assets/logo/logo-dark.svg">
-    <img src="./assets/logo/logo-light.svg" width="88" alt="mergeproof logo — two git branches merging into a green node carrying a check mark">
-  </picture>
+  <img src="./assets/logo/logo-tile.svg" width="88" alt="mergeproof logo — two git branches merging into a green node carrying a check mark, inside a rounded ink tile">
 </p>
 
 <p align="center">
