@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="mp-title mp-desc">
+  <title id="mp-title">mergeproof avatar tile</title>
+  <desc id="mp-desc">The mergeproof mark inside a rounded ink tile: the avatar and Marketplace form of the logo.</desc>
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="#1e293b"/>
+  <path d="M13 20 C 27 20 44 24 44 32" fill="none" stroke="#f8fafc" stroke-width="5" stroke-linecap="round"/>
+  <path d="M13 44 C 27 44 44 40 44 32" fill="none" stroke="#f8fafc" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="13" cy="20" r="5" fill="#f8fafc"/>
+  <circle cx="13" cy="44" r="5" fill="#f8fafc"/>
+  <circle cx="44" cy="32" r="10.5" fill="#059669"/>
+  <path d="M39.5 32 l4 4 L51.5 27.5" fill="none" stroke="#ffffff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
