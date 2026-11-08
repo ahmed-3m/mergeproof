@@ -180,3 +180,7 @@ Out of scope for v1, planned for v2: a GitHub App, a hosted service and a dashbo
 ## License
 
 MIT © ahmed-3m
+
+---
+
+**By Ahmed Mohammed** — AI/ML engineer, Linz · [Portfolio](https://ahmed-3m.github.io) · [LinkedIn](https://www.linkedin.com/in/ahmed-3m/)
