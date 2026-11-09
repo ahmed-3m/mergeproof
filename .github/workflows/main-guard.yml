@@ -7,7 +7,8 @@
 # cannot prevent that; it makes it loud. A push fails this job and opens an
 # issue when:
 #   - it force-pushed main;
-#   - a pushed commit belongs to no merged PR (a direct push);
+#   - a pushed commit belongs to no merged PR even after a backoff that lets
+#     GitHub's commit→PR association index catch up (it lags merge pushes);
 #   - a merged PR's required CI jobs had not all succeeded on its head before
 #     the merge, or another Actions check run on that head failed.
 #
@@ -63,8 +64,20 @@ jobs:
           declare -A seen=()
           for sha in $shas; do
             [[ "$sha" =~ $sha_re ]] || continue
-            prs="$(gh api "repos/$REPO/commits/$sha/pulls" \
-              --jq '[.[] | select(.merged_at != null and .base.ref == "main") | .number] | unique | .[]')"
+            # GitHub's commit→PR association index propagates asynchronously:
+            # this job can run before the pushed branch commits' associations
+            # have landed (issue #66 flagged a reviewed, CI-green merge as a
+            # direct push ~5s after its push; the same query resolved minutes
+            # later). An empty result is retried with backoff before it counts
+            # as a direct push — a genuinely direct commit never associates,
+            # so this only buys the indexer time, it never excuses a bypass.
+            prs=""
+            for delay in 0 5 10 20; do
+              sleep "$delay"
+              prs="$(gh api "repos/$REPO/commits/$sha/pulls" \
+                --jq '[.[] | select(.merged_at != null and .base.ref == "main") | .number] | unique | .[]')"
+              if [ -n "$prs" ]; then break; fi
+            done
             if [ -z "$prs" ]; then
               problems+=("commit ${sha:0:12} is not part of any merged PR (direct push)")
               continue

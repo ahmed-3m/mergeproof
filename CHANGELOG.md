@@ -17,6 +17,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - README header logo: the light/dark `<picture>` pair switched on `prefers-color-scheme`, which follows the OS setting — not GitHub's site theme — so dark-theme visitors could get dark ink on a dark page. The header now uses the theme-independent tile mark (`logo-tile.svg`); the SVG pair stays in `assets/logo/` for controlled-background uses.
 - The release workflow finishes the release even when it cannot move `v1` itself: a release whose tree changes `.github/workflows/` (any release after a promote) has its v1 push rejected — GITHUB_TOKEN has no scope for workflow-changing pushes, and the v0.2.0 move had only passed because its tag commit left the workflows untouched. v0.3.0's run died at that step before creating the Release (the tag was moved by hand and the run re-executed green). The workflow now creates the Release first and degrades the v1 move to a warning carrying the exact hand command, documented in `docs/releasing.md`.
+- main-guard: an empty commit→PR association is retried with backoff (5s/10s/20s) before a commit is called a direct push. GitHub's association index lags merge pushes — issue #66 flagged a reviewed, CI-green PR merge (#65) as a direct push ~5 seconds after the push, and the same query resolved minutes later. A genuinely direct commit never associates, so the retry only buys the indexer time without excusing anything.
 
 ## [0.3.0] - 2026-11-03
 
