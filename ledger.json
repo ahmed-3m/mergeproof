@@ -25,9 +25,9 @@
       "attempts": 1,
       "verdict": "HUMAN",
       "provenAt": "2026-11-08T11:36:12.562Z",
-      "mergedAt": null,
-      "mergeCommit": null,
-      "status": "open"
+      "mergedAt": "2026-11-08T11:48:58Z",
+      "mergeCommit": "654f8e256e4a5b084daee8ea275564612be0cc3e",
+      "status": "pending"
     }
   ]
 }
