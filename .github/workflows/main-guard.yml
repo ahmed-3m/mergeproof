@@ -7,7 +7,8 @@
 # cannot prevent that; it makes it loud. A push fails this job and opens an
 # issue when:
 #   - it force-pushed main;
-#   - a pushed commit belongs to no merged PR (a direct push);
+#   - a pushed commit belongs to no merged PR even after a backoff that lets
+#     GitHub's commit→PR association index catch up (it lags merge pushes);
 #   - a merged PR's required CI jobs had not all succeeded on its head before
 #     the merge, or another Actions check run on that head failed.
 #
@@ -61,13 +62,23 @@ jobs:
           fi
 
           declare -A seen=()
-          for sha in $shas; do
-            [[ "$sha" =~ $sha_re ]] || continue
-            prs="$(gh api "repos/$REPO/commits/$sha/pulls" \
-              --jq '[.[] | select(.merged_at != null and .base.ref == "main") | .number] | unique | .[]')"
+          declare -A pending=() # commits still waiting on the association index
+          # The merged-PR numbers a commit carries, or nothing while GitHub's
+          # commit→PR association index has not caught up: it propagates
+          # asynchronously and lags merge pushes (issue #66 flagged a reviewed,
+          # CI-green merge as a direct push ~5s after its push; the same query
+          # resolved minutes later). A genuinely direct commit never
+          # associates, so retrying only buys the indexer time — it never
+          # excuses a bypass.
+          associate() {
+            gh api "repos/$REPO/commits/$1/pulls" \
+              --jq '[.[] | select(.merged_at != null and .base.ref == "main") | .number] | unique | .[]'
+          }
+          check_commit() { # $1 = sha, $2 = its merged-PR numbers; empty queues it for the shared retry rounds below
+            local sha="$1" prs="$2" pr head merged_at verdict
             if [ -z "$prs" ]; then
-              problems+=("commit ${sha:0:12} is not part of any merged PR (direct push)")
-              continue
+              pending[$sha]=1
+              return
             fi
             for pr in $prs; do
               [ -z "${seen[$pr]:-}" ] || continue
@@ -92,6 +103,29 @@ jobs:
                   else "ok" end')"
               [ "$verdict" = "ok" ] || problems+=("PR #$pr merged with $verdict")
             done
+          }
+
+          for sha in $shas; do
+            [[ "$sha" =~ $sha_re ]] || continue
+            check_commit "$sha" "$(associate "$sha")"
+          done
+          # Retry rounds with a shared backoff over only the still-pending
+          # commits: the wait is fixed no matter how many commits the push
+          # carried — a per-commit window would delay a 250-commit direct push
+          # by 35s per commit before the alert lands.
+          for delay in 5 10 20; do
+            [ "${#pending[@]}" -gt 0 ] || break
+            sleep "$delay"
+            for sha in "${!pending[@]}"; do
+              prs="$(associate "$sha")"
+              if [ -n "$prs" ]; then
+                unset "pending[$sha]"
+                check_commit "$sha" "$prs"
+              fi
+            done
+          done
+          for sha in "${!pending[@]}"; do
+            problems+=("commit ${sha:0:12} is not part of any merged PR (direct push)")
           done
 
           if [ "${#problems[@]}" -eq 0 ]; then
