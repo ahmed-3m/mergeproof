@@ -1,9 +1,9 @@
-# Main guard: flag every change to main that did not land through a reviewed,
-# CI-green pull request.
+# Main guard: flag every change to main that did not land through a CI-green
+# pull request.
 #
 # The `protect-main` repository ruleset is now the primary control on main.
 # This workflow stays as defense in depth: it makes loud any change to main
-# that did not land through a reviewed, CI-green pull request — for example a
+# that did not land through a CI-green pull request — for example a
 # ruleset bypass by an admin, or a ruleset later weakened or removed. A push
 # fails this job and opens an issue when:
 #   - it force-pushed main;
