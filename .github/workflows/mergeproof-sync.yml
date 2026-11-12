@@ -47,7 +47,7 @@ jobs:
             git -C "$LEDGER_DIR" rm -r --quiet --ignore-unmatch . || true
           fi
       - name: Settle the ledger — mergeproof sync
-        uses: ahmed-3m/mergeproof@7a14215da893a542a6c495db9d41ca7988fec990 # v0.3.0
+        uses: ahmed-3m/mergeproof@a98d4742d82c75328ee14d6c90d4ee2324184aba # v1.0.0
         env:
           GH_TOKEN: ${{ github.token }}
         with:
@@ -58,7 +58,7 @@ jobs:
         # tab. Read-only command; the action appends stdout to
         # $GITHUB_STEP_SUMMARY when summary is 'true'. No new secret, and the
         # workflow's permissions are unchanged.
-        uses: ahmed-3m/mergeproof@7a14215da893a542a6c495db9d41ca7988fec990 # v0.3.0
+        uses: ahmed-3m/mergeproof@a98d4742d82c75328ee14d6c90d4ee2324184aba # v1.0.0
         with:
           command: retro
           args: --ledger .mergeproof-ledger/ledger.json
