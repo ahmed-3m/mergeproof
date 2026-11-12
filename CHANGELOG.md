@@ -4,7 +4,11 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Changed
+- ROADMAP marks MP-108 and MP-110 done and MP-111 ready; the main-guard comment now describes the `protect-main` ruleset.
+
 ### Fixed
+- `.mergeproof.json` maps `mergeproof-bot` to `gemini-cli`/`gemini-3-flash-preview`, matching the repo's Actions variables, so the issue workflow's identity guard no longer stops every bot run.
 - main-guard: an empty commit→PR association is retried with shared backoff rounds (5s/10s/20s over all still-pending commits, so the window is fixed no matter how many a push carries) before a commit is called a direct push. GitHub's association index lags merge pushes — issue #66 flagged a reviewed, CI-green PR merge (#65) as a direct push ~5 seconds after the push, and the same query resolved minutes later. A genuinely direct commit never associates, so the retry only buys the indexer time without excusing anything.
 
 ## [1.0.0] - 2026-11-09
