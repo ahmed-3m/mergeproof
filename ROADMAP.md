@@ -106,7 +106,7 @@ Acceptance:
 
 ### [MP-108] Union-merge the events log on push
 - kind: feature
-- status: ready
+- status: done
 
 Concurrent apply jobs each push `events.jsonl`; a plain rebase can drop or duplicate records. The ledger push step (`templates/workflows/mergeproof-pr.yml`) union-merges by `id` before pushing, the way outcomes are never doubled.
 
@@ -128,7 +128,7 @@ Acceptance:
 
 ### [MP-110] Nightly sync writes retro to the step summary
 - kind: feature
-- status: ready
+- status: done
 
 The retro table exists (MP-109) but nobody sees it. The nightly sync workflow (`templates/workflows/mergeproof-sync.yml`) runs `mergeproof retro` after settling and appends its output to `$GITHUB_STEP_SUMMARY`.
 
@@ -141,7 +141,7 @@ Acceptance:
 
 ### [MP-111] Per-file test command placeholders
 - kind: feature
-- status: later
+- status: ready
 
 `testFileCommand` only knows how to append a file path. `src/adapters/runner.mjs` gains placeholders substituted per argv element — `{file}` (today's append behaviour), `{dir}`, `{stem}`, `{goTests}` — with every substituted value checked against SAFE_PATH; Go test names must match `^Test\w*$`.
 
