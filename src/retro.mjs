@@ -43,10 +43,16 @@ export function summarize(events, ledger = null, { minN = 5 } = {}) {
     }
     const prs = [...b.maxAttempt.keys()];
     const mergedPrs = prs.filter((pr) => b.events.some((e) => e.pr === pr && e.merged === true));
-    const settled = (ledger?.outcomes ?? []).filter(
-      (o) => (o.status === 'clean' || o.status === 'reverted') && o.kind === b.kind && o.agent === b.agent && o.model === b.model && (o.skill ?? 'none') === b.skill,
+    const bucketOutcomes = (ledger?.outcomes ?? []).filter(
+      (o) => o.kind === b.kind && o.agent === b.agent && o.model === b.model && (o.skill ?? 'none') === b.skill,
     );
-    const reverted = settled.filter((o) => o.status === 'reverted');
+    const clean = bucketOutcomes.filter((o) => o.status === 'clean');
+    const reverted = bucketOutcomes.filter((o) => o.status === 'reverted');
+    const pending = bucketOutcomes.filter((o) => o.status === 'pending');
+    const settled = [...clean, ...reverted];
+    const rejected = bucketOutcomes.filter((o) => o.status === 'closed' && o.closedByAuthor === false);
+    const decided = pending.length + clean.length + reverted.length + rejected.length;
+    const withRejectionsTotal = clean.length + reverted.length + rejected.length;
     return {
       kind: b.kind,
       agent: b.agent,
@@ -60,6 +66,9 @@ export function summarize(events, ledger = null, { minN = 5 } = {}) {
       humanReasons,
       mergeRate: prs.length === 0 ? 0 : mergedPrs.length / prs.length,
       revertRate: settled.length === 0 ? null : reverted.length / settled.length,
+      rejected: rejected.length,
+      decided,
+      cleanRateWithRejections: withRejectionsTotal === 0 ? null : clean.length / withRejectionsTotal,
     };
   });
 }
@@ -84,6 +93,9 @@ export function formatRetro(groups, { minN = 5 } = {}) {
       `  first-try proven ${pct(g.firstTryProvenRate)} · retry→proven ${pct(g.retryProvenRate)} · mean attempts ${g.meanAttempts.toFixed(1)} · merged ${pct(g.mergeRate)} · reverted ${pct(g.revertRate)}`,
     );
     lines.push(`  HUMAN reasons: ${g.humanReasons.tamper} tamper · ${g.humanReasons.humanOnly} human-only · ${g.humanReasons.untrusted} untrusted · ${g.humanReasons.other} other`);
+    lines.push(
+      `  rejections: ${g.rejected ?? 0} rejected · ${g.decided ?? 0} decided · clean with rejections ${pct(g.cleanRateWithRejections)}`,
+    );
   }
   return lines.join('\n');
 }
