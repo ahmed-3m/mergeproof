@@ -261,3 +261,54 @@ Acceptance:
 - The three invariants are asserted for every shipped skill.
 - The suite fails on a hand-edited copy (an older version, or an equal version with different bytes).
 - No production code changes; the suite runs in `npm test`.
+
+## Phase H — measure trust signals
+
+### [MP-122] sync records who closed an unmerged proven PR
+- kind: feature
+- status: later
+
+`settle` (`src/commands/sync.mjs`) turns an open outcome into `closed` when its PR was closed without merging, and the ledger keeps nothing else. A maintainer closing a proven PR is a judgment that the proof was not enough; an author closing their own PR is not. Record which one it was, as measurement only. `prState` also returns the PR author (`getPullRequest` already has it) and the login that closed the PR, read through the existing `gh.apiJson` from `repos/{repo}/issues/{n}/events?per_page=100` (the last `closed` event's `actor.login`). When an outcome turns `closed`, `settle` copies `closedBy` and `closedByAuthor` onto it. A maintainer who is also an agent login (their own `agent/` PRs) always reads as an author close, so the measure only says something about PRs a separate bot account opened.
+
+Acceptance:
+- A newly closed outcome carries `closedBy` (a login, or null) and `closedByAuthor` (a boolean, or null when either login is unknown). A failed read, or no `closed` event in the first 100, leaves both null and still settles the outcome.
+- A `prState` result without the new fields settles exactly as today, and outcomes that are already `closed` are not revisited.
+- `src/ledger.mjs` is untouched, and a test asserts `trustFor` returns the same result with and without the new fields.
+- The sync workflow needs no change: it already commits the whole ledger directory.
+- A new `tests/*.test.mjs` suite covers a maintainer close, an author close and a failed read (created, not an edit to `tests/commands.test.mjs`: an agent PR editing an existing test file is the `existingTestEdited` tamper rule).
+
+### [MP-123] retro shows maintainer rejections of proven PRs
+- kind: feature
+- status: later
+
+Trust counts merged outcomes only, so a proven PR a maintainer rejected never lowers a clean rate. Before changing that, show what it would do. `summarize` (`src/retro.mjs`) adds, per bucket, from the ledger: `rejected` (outcomes `closed` with `closedByAuthor === false`, MP-122), `decided` (`pending`, `clean` and `reverted` outcomes plus `rejected`) and `cleanRateWithRejections` (clean / (clean + reverted + rejected), null when that sum is 0). `formatRetro` prints them on one new line.
+
+Acceptance:
+- A `closed` outcome without `closedByAuthor`, or with it true or null, counts as neither merged nor rejected.
+- Every line `formatRetro` prints today is unchanged; the new line appears only for groups at or above `--min-n`.
+- `summarize` stays pure (no I/O), and nothing in `src/ledger.mjs` or `trustFor` changes.
+- A new `tests/*.test.mjs` suite drives `summarize` and `formatRetro` with a fixture ledger (created, not an edit to `tests/retro.test.mjs`).
+
+### [MP-124] sync records the release that first shipped each merge
+- kind: feature
+- status: later
+
+An outcome turns `clean` after `trust.revertWindowDays` quiet days, whether or not anything exercised the change in that time. Measure the exposure: add `tagsContaining(repoRoot, sha)` to `src/adapters/git.mjs` (through `runProcess`, argv only), returning the tags that contain a commit, oldest first by creation date. When `settle` turns a `pending` outcome `clean`, it records `releasedIn` (the oldest such tag created on or before the settle time, or null) through a new optional `releaseOf(mergeCommit)` argument that `runSync` wires to the adapter.
+
+Acceptance:
+- A merge contained in a tag settles with `releasedIn` set to the oldest containing tag; one in no tag settles with `releasedIn: null`; `reverted` and `closed` outcomes get no field.
+- Tag names are stored only when they match `^[A-Za-z0-9._/-]{1,100}$`, are never passed to a shell, and a failed tag read leaves `releasedIn` null without failing the sync.
+- `settle` called without `releaseOf` behaves exactly as today; `src/ledger.mjs` and `trustFor` are untouched.
+- A new `tests/*.test.mjs` suite runs `tagsContaining` against a real git repo and `settle` with a stub `releaseOf` (created, not an edit to an existing suite).
+
+### [MP-125] retro shows release exposure of clean outcomes
+- kind: feature
+- status: later
+
+With `releasedIn` on the ledger (MP-124), show how many `clean` outcomes shipped in a release before they settled. `summarize` adds `cleanReleased` (clean outcomes with a non-null `releasedIn`) and `cleanMeasured` (clean outcomes that have the field at all) per bucket, and `formatRetro` prints `shipped before settling: <cleanReleased> of <cleanMeasured> clean`.
+
+Acceptance:
+- Clean outcomes settled before MP-124 (no `releasedIn` field) are left out of both counts.
+- The line is omitted when `cleanMeasured` is 0, and every line printed today is unchanged.
+- `summarize` stays pure, and nothing in `src/ledger.mjs` or `trustFor` changes.
+- A new `tests/*.test.mjs` suite covers a released, an unreleased and an unmeasured outcome (created, not an edit to `tests/retro.test.mjs`).
