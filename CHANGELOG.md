@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Changed
 - ROADMAP marks MP-108 and MP-110 done and MP-111 ready; the main-guard comment now describes the `protect-main` ruleset.
+- This repo runs v1.0.0: `.github/workflows/mergeproof-{issue,pr,sync,roadmap}.yml` regenerated at the `v1.0.0` commit (`a98d474`) via `scripts/promote.mjs`, and `.github/dependabot.yml` ignores `ahmed-3m/mergeproof` so Dependabot stops opening partial bumps that skip `MERGEPROOF_REF`.
 
 ### Fixed
 - `.mergeproof.json` maps `mergeproof-bot` to `gemini-cli`/`gemini-3-flash-preview`, matching the repo's Actions variables, so the issue workflow's identity guard no longer stops every bot run.
