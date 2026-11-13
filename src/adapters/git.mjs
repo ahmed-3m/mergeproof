@@ -234,3 +234,26 @@ export function removeWorktree(repoRoot, dir) {
 export function checkoutFiles(worktree, sha, paths) {
   if (paths.length > 0) git(worktree, ['checkout', sha, '--', ...paths]);
 }
+
+/** Tags containing `sha`, oldest first by creator date. */
+export function tagsContaining(repoRoot, sha) {
+  if (typeof sha !== 'string' || !/^[0-9a-f]{7,40}$/i.test(sha)) return [];
+  const raw = out(repoRoot, [
+    'tag',
+    '--contains',
+    sha,
+    '--sort=creatordate',
+    // Lightweight tags report the tagged commit's committer date as creatordate, not tag creation time.
+    '--format=%(refname:strip=2)%09%(creatordate:iso-strict)',
+  ]);
+  if (!raw) return [];
+  return raw
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => {
+      const tab = line.indexOf('\t');
+      return tab === -1
+        ? { name: line, date: '' }
+        : { name: line.slice(0, tab), date: line.slice(tab + 1) };
+    });
+}

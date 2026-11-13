@@ -5,6 +5,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ## [Unreleased]
 
 ### Added
+- `mergeproof sync` records `releasedIn` on outcomes that turn `clean` (the oldest containing release tag created on or before settle time, or `null` if none), using `tagsContaining` in the git adapter (MP-124). Measurement only; `trustFor` is unchanged.
 - `sync` records `closedBy` and `closedByAuthor` when an `open` proven outcome settles to `closed` (MP-122), reading the last `closed` event from `repos/{repo}/issues/{n}/events?per_page=100`; failed or missing event reads leave both `null`. Measurement only; `trustFor` is untouched.
 
 ### Changed
