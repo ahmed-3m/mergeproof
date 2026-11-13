@@ -8,3 +8,7 @@ updates:
     groups:
       actions:
         patterns: ['*']
+    # Self-hosted mergeproof pins are managed by scripts/promote.mjs (which
+    # also updates env.MERGEPROOF_REF in mergeproof-issue.yml and the headers).
+    ignore:
+      - dependency-name: 'ahmed-3m/mergeproof'
