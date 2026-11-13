@@ -96,7 +96,12 @@ export function settle(ledger, { commits, prState, now, windowDays, patchId = nu
     if (next.status === 'open' && next.url) {
       const st = prState(next.url);
       if (st.state === 'MERGED') next = { ...next, status: 'pending', mergedAt: st.mergedAt, mergeCommit: st.mergeCommit };
-      else if (st.state === 'CLOSED') next = { ...next, status: 'closed' };
+      else if (st.state === 'CLOSED') {
+        const closedBy = typeof st.closedBy === 'string' && st.closedBy ? st.closedBy : null;
+        const author = typeof st.author === 'string' && st.author ? st.author : null;
+        const closedByAuthor = closedBy && author ? closedBy.toLowerCase() === author.toLowerCase() : null;
+        next = { ...next, status: 'closed', closedBy, closedByAuthor };
+      }
     }
     if (next.status === 'pending') {
       const mergedAt = Date.parse(next.mergedAt);
@@ -116,6 +121,23 @@ export function settle(ledger, { commits, prState, now, windowDays, patchId = nu
   return { ledger: { ...ledger, outcomes }, newlyReverted };
 }
 
+function closerOf(ghClient, url) {
+  const parsed = gh.parsePrUrl(url);
+  if (!parsed || !ghClient.apiJson) return null;
+  try {
+    const events = ghClient.apiJson(`repos/${parsed.repo}/issues/${parsed.number}/events?per_page=100`);
+    // The endpoint returns the oldest 100 events; a full page may truncate a
+    // later reopen/close, so leave the closer unknown rather than record a stale one.
+    if (!Array.isArray(events) || events.length >= 100) return null;
+    for (let i = events.length - 1; i >= 0; i--) {
+      if (events[i]?.event === 'closed') return events[i]?.actor?.login || null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // Find reverts of gated merges, mark those outcomes reverted, and open a
 // human-triage regression issue (never labeled for the agent). Run it on the
 // default branch after a fetch, e.g. in a nightly workflow (M2).
@@ -129,7 +151,9 @@ export async function runSync(argv, deps = defaultDeps) {
   const before = readLedger(ledgerPath);
   const prState = (url) => {
     const pr = deps.gh.getPullRequest(url);
-    return { state: pr.state, mergedAt: pr.mergedAt, mergeCommit: pr.mergeCommit };
+    const author = typeof pr.author === 'string' && pr.author && pr.author !== 'unknown' ? pr.author : null;
+    const closedBy = pr.state === 'CLOSED' ? closerOf(deps.gh, url) : null;
+    return { state: pr.state, mergedAt: pr.mergedAt, mergeCommit: pr.mergeCommit, author, closedBy };
   };
   const releaseOf = typeof deps.git.tagsContaining === 'function'
     ? (sha) => deps.git.tagsContaining(root, sha)
