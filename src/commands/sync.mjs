@@ -49,6 +49,32 @@ function revertOf(reverts, o, { commits, patchId, mergedAt, windowEnd }) {
   return commits.filter(after).reverse().find((c) => patchId(c.sha, false) === undo) ?? null;
 }
 
+const SAFE_TAG_NAME = /^[A-Za-z0-9._/-]{1,100}$/;
+
+function releaseFor(mergeCommit, settleMs, releaseOf) {
+  if (!mergeCommit) return null;
+  let tags;
+  try {
+    tags = releaseOf(mergeCommit);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(tags)) return null;
+  let bestName = null;
+  let bestMs = Infinity;
+  for (const tag of tags) {
+    const name = tag?.name;
+    if (typeof name !== 'string' || !SAFE_TAG_NAME.test(name)) continue;
+    const ms = Date.parse(tag?.date ?? tag?.createdAt ?? '');
+    if (!Number.isFinite(ms) || ms > settleMs) continue;
+    if (ms < bestMs) {
+      bestMs = ms;
+      bestName = name;
+    }
+  }
+  return bestName;
+}
+
 /**
  * Settle the ledger (PROTOTYPE.md flow 3, learning half). Returns the new ledger
  * and the outcomes that were newly reverted. Pure apart from `prState` and `patchId`.
@@ -56,7 +82,7 @@ function revertOf(reverts, o, { commits, patchId, mergedAt, windowEnd }) {
  *   pending  → reverted if a revert of its merge commit landed inside the window
  *   pending  → clean once the window has passed with no revert
  */
-export function settle(ledger, { commits, prState, now, windowDays, patchId = null }) {
+export function settle(ledger, { commits, prState, now, windowDays, patchId = null, releaseOf = null }) {
   const reverts = findReverts(commits);
   const ids = new Map();
   const cachedPatchId = patchId && ((sha, reverse) => {
@@ -80,7 +106,9 @@ export function settle(ledger, { commits, prState, now, windowDays, patchId = nu
         next = { ...next, status: 'reverted', revertCommit: revert.sha };
         newlyReverted.push(next);
       } else if (now.getTime() - mergedAt > windowDays * DAY) {
-        next = { ...next, status: 'clean' };
+        next = releaseOf
+          ? { ...next, status: 'clean', releasedIn: releaseFor(next.mergeCommit, now.getTime(), releaseOf) }
+          : { ...next, status: 'clean' };
       }
     }
     return next;
@@ -103,12 +131,16 @@ export async function runSync(argv, deps = defaultDeps) {
     const pr = deps.gh.getPullRequest(url);
     return { state: pr.state, mergedAt: pr.mergedAt, mergeCommit: pr.mergeCommit };
   };
+  const releaseOf = typeof deps.git.tagsContaining === 'function'
+    ? (sha) => deps.git.tagsContaining(root, sha)
+    : null;
   const { ledger, newlyReverted } = settle(before, {
     commits: deps.git.log(root, ref),
     prState,
     now: deps.now(),
     windowDays: config.trust.revertWindowDays,
     patchId: (sha, reverse) => deps.git.patchId(root, sha, { reverse }),
+    releaseOf,
   });
 
   const issues = [];

@@ -4,6 +4,9 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+- `mergeproof sync` records `releasedIn` on outcomes that turn `clean` (the oldest containing release tag created on or before settle time, or `null` if none), using `tagsContaining` in the git adapter (MP-124). Measurement only; `trustFor` is unchanged.
+
 ### Changed
 - ROADMAP marks MP-108 and MP-110 done and MP-111 ready; the main-guard comment now describes the `protect-main` ruleset.
 - ROADMAP gains Phase H (measure trust signals) with four `later` items, MP-122 to MP-125: sync records who closed an unmerged proven PR and which release first shipped each merge, and retro shows both. Measurement only; nothing feeds `trustFor`.
