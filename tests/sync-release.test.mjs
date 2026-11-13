@@ -40,11 +40,13 @@ test('tagsContaining: commit in two tags returns both oldest first; commit in no
     const taggedSha = repo.commit('feat: first release');
     tagAt(repo.dir, 'v1.1.0', taggedSha, '2026-06-10T00:00:00Z');
     tagAt(repo.dir, 'v1.0.0', firstSha, '2026-06-05T00:00:00Z');
+    repo.git(['branch', 'v1.0.0', firstSha]);
     repo.write({ 'b.txt': 'unreleased\n' });
     const untaggedSha = repo.commit('feat: unreleased');
 
     const firstTags = tagsContaining(repo.dir, firstSha);
     assert.deepEqual(firstTags.map((t) => t.name), ['v1.0.0', 'v1.1.0']);
+    assert.ok(firstTags.every((t) => Number.isFinite(Date.parse(t.date))));
     assert.equal(tagsContaining(repo.dir, untaggedSha).length, 0);
   } finally {
     repo.cleanup();

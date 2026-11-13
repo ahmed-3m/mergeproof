@@ -243,7 +243,8 @@ export function tagsContaining(repoRoot, sha) {
     '--contains',
     sha,
     '--sort=creatordate',
-    '--format=%(refname:short)%09%(creatordate:iso-strict)',
+    // Lightweight tags report the tagged commit's committer date as creatordate, not tag creation time.
+    '--format=%(refname:strip=2)%09%(creatordate:iso-strict)',
   ]);
   if (!raw) return [];
   return raw
