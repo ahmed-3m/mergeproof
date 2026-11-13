@@ -84,6 +84,17 @@ test('a failed events read or missing closed event leaves both fields null and s
   assert.equal(missing.outcome.closedByAuthor, null);
 });
 
+test('a full page of 100 events leaves closedBy and closedByAuthor null and still settles', async () => {
+  const events = Array.from({ length: 100 }, (_, i) => (
+    i === 0 ? { event: 'closed', actor: { login: 'ahmed-3m' } } : { event: 'labeled', actor: { login: 'mergeproof-bot' } }
+  ));
+  const { exitCode, outcome } = await syncClosedOutcome({ prAuthor: 'mergeproof-bot', events });
+  assert.equal(exitCode, 0);
+  assert.equal(outcome.status, 'closed');
+  assert.equal(outcome.closedBy, null);
+  assert.equal(outcome.closedByAuthor, null);
+});
+
 test('settle handles prState without new fields and never revisits already closed outcomes', () => {
   const ledger = {
     schema: LEDGER_SCHEMA,

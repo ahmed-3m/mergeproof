@@ -98,7 +98,9 @@ function closerOf(ghClient, url) {
   if (!parsed || !ghClient.apiJson) return null;
   try {
     const events = ghClient.apiJson(`repos/${parsed.repo}/issues/${parsed.number}/events?per_page=100`);
-    if (!Array.isArray(events)) return null;
+    // The endpoint returns the oldest 100 events; a full page may truncate a
+    // later reopen/close, so leave the closer unknown rather than record a stale one.
+    if (!Array.isArray(events) || events.length >= 100) return null;
     for (let i = events.length - 1; i >= 0; i--) {
       if (events[i]?.event === 'closed') return events[i]?.actor?.login || null;
     }
