@@ -1,9 +1,9 @@
 // `mergeproof retro` (MP-109): summarize how the agent has been doing, per
 // (kind, agent, model, skill) bucket, from the events log apply writes
-// (MP-107) plus — for revert rates — the trust ledger. The skill string
-// already carries its version (`bugfix@4`), so each skill version earns its
-// own row. Pure counting and formatting: the command reads the files, this
-// module never does I/O.
+// (MP-107) plus — for revert rates and maintainer rejections — the trust
+// ledger. The skill string already carries its version (`bugfix@4`), so each
+// skill version earns its own row. Pure counting and formatting: the command
+// reads the files, this module never does I/O.
 
 const bucketKey = (e) => `${e.kind ?? 'unknown'}\u0000${e.agent}\u0000${e.model}\u0000${e.skill ?? 'none'}`;
 
@@ -12,8 +12,9 @@ const rate = (part, whole) => (whole.length === 0 ? null : part.length / whole.l
 /**
  * Group `events` by (kind, agent, model, skill) and count what happened.
  * With a `ledger`, each group also gets a revert rate from the settled
- * (`clean` or `reverted`) ledger outcomes of the same bucket — the events log
- * itself never decides anything about trust.
+ * (`clean` or `reverted`) outcomes and maintainer rejections from `closed`
+ * (`closedByAuthor === false`) ledger outcomes of the same bucket — the events
+ * log itself never decides anything about trust.
  * @param {object[]} events parsed events.jsonl records
  * @param {{ outcomes: object[] } | null} [ledger] the trust ledger, or null
  * @param {{ minN?: number }} [opts] groups with fewer runs are flagged insufficient (default 5)
@@ -43,10 +44,16 @@ export function summarize(events, ledger = null, { minN = 5 } = {}) {
     }
     const prs = [...b.maxAttempt.keys()];
     const mergedPrs = prs.filter((pr) => b.events.some((e) => e.pr === pr && e.merged === true));
-    const settled = (ledger?.outcomes ?? []).filter(
-      (o) => (o.status === 'clean' || o.status === 'reverted') && o.kind === b.kind && o.agent === b.agent && o.model === b.model && (o.skill ?? 'none') === b.skill,
+    const bucketOutcomes = (ledger?.outcomes ?? []).filter(
+      (o) => o.kind === b.kind && o.agent === b.agent && o.model === b.model && (o.skill ?? 'none') === b.skill,
     );
-    const reverted = settled.filter((o) => o.status === 'reverted');
+    const clean = bucketOutcomes.filter((o) => o.status === 'clean');
+    const reverted = bucketOutcomes.filter((o) => o.status === 'reverted');
+    const pending = bucketOutcomes.filter((o) => o.status === 'pending');
+    const settled = [...clean, ...reverted];
+    const rejected = bucketOutcomes.filter((o) => o.status === 'closed' && o.closedByAuthor === false);
+    const decided = pending.length + clean.length + reverted.length + rejected.length;
+    const withRejectionsTotal = clean.length + reverted.length + rejected.length;
     return {
       kind: b.kind,
       agent: b.agent,
@@ -60,6 +67,9 @@ export function summarize(events, ledger = null, { minN = 5 } = {}) {
       humanReasons,
       mergeRate: prs.length === 0 ? 0 : mergedPrs.length / prs.length,
       revertRate: settled.length === 0 ? null : reverted.length / settled.length,
+      rejected: rejected.length,
+      decided,
+      cleanRateWithRejections: withRejectionsTotal === 0 ? null : clean.length / withRejectionsTotal,
     };
   });
 }
@@ -84,6 +94,9 @@ export function formatRetro(groups, { minN = 5 } = {}) {
       `  first-try proven ${pct(g.firstTryProvenRate)} · retry→proven ${pct(g.retryProvenRate)} · mean attempts ${g.meanAttempts.toFixed(1)} · merged ${pct(g.mergeRate)} · reverted ${pct(g.revertRate)}`,
     );
     lines.push(`  HUMAN reasons: ${g.humanReasons.tamper} tamper · ${g.humanReasons.humanOnly} human-only · ${g.humanReasons.untrusted} untrusted · ${g.humanReasons.other} other`);
+    lines.push(
+      `  rejections: ${g.rejected ?? 0} rejected · ${g.decided ?? 0} decided · clean with rejections ${pct(g.cleanRateWithRejections)}`,
+    );
   }
   return lines.join('\n');
 }
