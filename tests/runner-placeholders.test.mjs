@@ -4,9 +4,9 @@
 // refusals. Driven against real `node` child processes via runTests().
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { runTests } from '../src/adapters/runner.mjs';
 
 function makeWorkspace(t) {
@@ -117,6 +117,9 @@ test('runTests substitutes {goTests} for single and multiple tests and strips ou
       '',
       'func helper() {}',
       '// func TestCommented(t *testing.T) {}',
+      '/*\nfunc TestBlockCommented(t *testing.T) {}\nfunc TestBad-InComment(t *testing.T) {}\n*/',
+      'var raw = `\nfunc TestInRawString(t *testing.T) {}\n`',
+      'var interp = "func TestInString(t *testing.T) {}"',
       'func (s *Suite) TestMethod(t *testing.T) {}',
       '  func TestIndented(t *testing.T) {}',
       'func BenchmarkAdd(b *testing.B) {}',
@@ -134,7 +137,7 @@ test('runTests substitutes {goTests} for single and multiple tests and strips ou
     only: ['pkg/calc/multi_test.go'],
   });
   assert.deepEqual(multi, { passed: ['pkg/calc/multi_test.go'], failed: [] });
-  assert.deepEqual(readArgv(), ['test', '-count=1', '-run', '^(TestAdd|TestSub_1|Test)$', './pkg/calc']);
+  assert.deepEqual(readArgv(), ['test', '-count=1', '-run', '^(TestIndented|TestAdd|TestSub_1|Test)$', './pkg/calc']);
 });
 
 test('runTests refuses unsafe file paths and unsafe {dir} / {stem} substitutions', (t) => {
@@ -167,7 +170,7 @@ test('runTests refuses unsafe file paths and unsafe {dir} / {stem} substitutions
   );
 });
 
-test('runTests refuses invalid Go Test* names and files with zero Test* functions', (t) => {
+test('runTests refuses invalid Go Test* names, comment/string-only files, and symlinks', (t) => {
   const { dir } = makeWorkspace(t);
   mkdirSync(join(dir, 'pkg'), { recursive: true });
 
@@ -197,7 +200,10 @@ test('runTests refuses invalid Go Test* names and files with zero Test* function
       'func BenchmarkOnly(b *testing.B) {}',
       'func ExampleOnly() {}',
       'func (s *Suite) TestMethod(t *testing.T) {}',
-      '  func TestIndented(t *testing.T) {}',
+      '// func TestLineComment(t *testing.T) {}',
+      '/*\nfunc TestBlockComment(t *testing.T) {}\n*/',
+      'var s = `\nfunc TestRawLiteral(t *testing.T) {}\n`',
+      'var q = "func TestQuoted(t *testing.T) {}"',
       '',
     ].join('\n'),
   );
@@ -209,6 +215,25 @@ test('runTests refuses invalid Go Test* names and files with zero Test* function
     }),
     /no Go Test\* functions found/,
   );
+
+  writeFileSync(join(dir, 'pkg', 'real_test.go'), 'package pkg\nfunc TestReal(t *testing.T) {}\n');
+  let symlinkCreated = false;
+  try {
+    symlinkSync(join(dir, 'pkg', 'real_test.go'), join(dir, 'pkg', 'link_test.go'));
+    symlinkCreated = true;
+  } catch (err) {
+    if (err.code !== 'EPERM') throw err;
+  }
+  if (symlinkCreated) {
+    assert.throws(
+      () => runTests(dir, {
+        testCommand: 'node -e ""',
+        testFileCommand: "node record.mjs -run '^({goTests})$' ./{dir}",
+        only: ['pkg/link_test.go'],
+      }),
+      /symlink/,
+    );
+  }
 });
 
 test('runTests strips quotes around tokens with spaces and rejects unclosed quotes', (t) => {
@@ -229,3 +254,29 @@ test('runTests strips quotes around tokens with spaces and rejects unclosed quot
     /unclosed quote/,
   );
 });
+
+if (process.platform === 'win32') {
+  test('runTests resolves extensionless Windows .cmd shims on PATH and quotes shell args safely', (t) => {
+    const { dir, readArgv } = makeWorkspace(t);
+    const binDir = join(dir, 'bin');
+    mkdirSync(binDir, { recursive: true });
+    // Mirror node_modules/.bin layout: an extensionless POSIX script beside a .cmd shim.
+    writeFileSync(join(binDir, 'myrunner'), '#!/bin/sh\nexit 1\n');
+    writeFileSync(join(binDir, 'myrunner.cmd'), '@echo off\r\nnode "%~dp0..\\record.mjs" %*\r\n');
+    writeFileSync(join(dir, 'sample_test.go'), 'package main\nfunc TestAlpha(t *testing.T) {}\nfunc TestBeta(t *testing.T) {}\n');
+
+    const savedPath = process.env.PATH;
+    process.env.PATH = `${binDir}${delimiter}${savedPath}`;
+    t.after(() => {
+      process.env.PATH = savedPath;
+    });
+
+    const res = runTests(dir, {
+      testCommand: 'node -e ""',
+      testFileCommand: 'myrunner "--filter=alpha beta" \'^({goTests})$\' {file}',
+      only: ['sample_test.go'],
+    });
+    assert.deepEqual(res, { passed: ['sample_test.go'], failed: [] });
+    assert.deepEqual(readArgv(), ['--filter=alpha beta', '^(TestAlpha|TestBeta)$', 'sample_test.go']);
+  });
+}

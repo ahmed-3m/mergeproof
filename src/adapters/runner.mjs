@@ -1,4 +1,4 @@
-import { chmodSync, closeSync, constants, fstatSync, mkdtempSync, openSync, readdirSync, readFileSync, readSync, rmSync } from 'node:fs';
+import { chmodSync, closeSync, constants, fstatSync, lstatSync, mkdtempSync, openSync, readdirSync, readSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join, posix } from 'node:path';
 import { runProcess } from './process.mjs';
@@ -46,13 +46,70 @@ export function cleanEnv(sourceEnv = process.env) {
 const WIN_SHIMS = new Set(['npm', 'npx', 'yarn', 'pnpm']);
 const HAS_PLACEHOLDER = /\{(file|dir|stem|goTests)\}/;
 const PLACEHOLDER_RE = /\{(file|dir|stem|goTests)\}/g;
-const GO_TEST_RE = /^func[ \t]+(Test[^\n(]*?)[ \t]*\(/gm;
+const GO_TEST_RE = /^[ \t]*func[ \t]+(Test[^\n(]*?)[ \t]*\(/gm;
 const SAFE_GO_TEST = /^Test\w*$/;
+const MAX_GO_TEST_BYTES = 8 * 1024 * 1024;
+const OPEN_READ_FLAGS = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
 
-function needsShell(bin) {
+function envLookup(env, name) {
+  const target = name.toUpperCase();
+  for (const [k, v] of Object.entries(env)) {
+    if (k.toUpperCase() === target) return v;
+  }
+  return undefined;
+}
+
+function isRegularFile(filePath) {
+  try {
+    return statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function isCmdShim(filePath) {
+  const lower = filePath.toLowerCase();
+  return lower.endsWith('.cmd') || lower.endsWith('.bat');
+}
+
+function resolveWinCommand(bin, cwd, env) {
+  const lower = bin.toLowerCase();
+  if (isCmdShim(lower) || lower.endsWith('.exe') || lower.endsWith('.com')) return bin;
+  const exts = (envLookup(env, 'PATHEXT') || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean);
+  const candidates = (dir, name) => exts.map((ext) => join(dir, name + ext)).concat(join(dir, name));
+  if (bin.includes('/') || bin.includes('\\')) {
+    const target = /^(?:[A-Za-z]:|[\\/])/.test(bin) ? bin : join(cwd, bin);
+    for (const ext of exts) {
+      if (isRegularFile(target + ext)) return target + ext;
+    }
+    if (isRegularFile(target)) return target;
+    return bin;
+  }
+  const pathDirs = [cwd, ...(envLookup(env, 'PATH') || '').split(';').map((d) => d.replace(/^"|"$/g, '')).filter(Boolean)];
+  for (const dir of pathDirs) {
+    for (const candidate of candidates(dir, bin)) {
+      if (isRegularFile(candidate)) return candidate;
+    }
+  }
+  return bin;
+}
+
+function needsShell(bin, cwd, env) {
   if (process.platform !== 'win32') return false;
-  const base = basename(bin).toLowerCase();
-  return WIN_SHIMS.has(base) || base.endsWith('.cmd') || base.endsWith('.bat');
+  const resolved = resolveWinCommand(bin, cwd, env);
+  if (isCmdShim(resolved)) return true;
+  if (resolved !== bin) return false;
+  return WIN_SHIMS.has(basename(bin).toLowerCase());
+}
+
+function quoteWinShellArg(arg) {
+  if (/[\r\n\0]/.test(arg)) {
+    throw new Error(`refusing control character in shell argument ${JSON.stringify(arg)}`);
+  }
+  if (arg === '' || /[\s"&|<>^();,=%!']/.test(arg)) {
+    return `"${arg.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\*)$/, '$1$1')}"`;
+  }
+  return arg;
 }
 
 // Tokenize a trusted command string on whitespace while stripping matching outer
@@ -104,8 +161,87 @@ function normalizeSafeFile(file) {
   return norm;
 }
 
+function readRegularFileBounded(filePath, maxBytes, label) {
+  if (lstatSync(filePath).isSymbolicLink()) {
+    throw new Error(`refusing to read symlink ${label}`);
+  }
+  let fd = null;
+  try {
+    fd = openSync(filePath, OPEN_READ_FLAGS);
+    const st = fstatSync(fd);
+    if (!st.isFile()) throw new Error(`refusing to read non-regular ${label}`);
+    if (st.size > maxBytes) throw new Error(`refusing to read oversized ${label}`);
+    const chunks = [];
+    let total = 0;
+    const buf = Buffer.allocUnsafe(65536);
+    while (true) {
+      const n = readSync(fd, buf, 0, buf.length, null);
+      if (n === 0) break;
+      total += n;
+      if (total > maxBytes) throw new Error(`refusing to read oversized ${label}`);
+      chunks.push(Buffer.from(buf.subarray(0, n)));
+    }
+    return Buffer.concat(chunks, total).toString('utf8');
+  } finally {
+    if (fd !== null) {
+      try {
+        closeSync(fd);
+      } catch {
+        // ignore close errors
+      }
+    }
+  }
+}
+
+function stripGoCommentsAndStrings(source) {
+  let out = '';
+  let i = 0;
+  const n = source.length;
+  while (i < n) {
+    const ch = source[i];
+    const next = source[i + 1];
+    if (ch === '/' && next === '/') {
+      i += 2;
+      while (i < n && source[i] !== '\n') i++;
+      out += ' ';
+    } else if (ch === '/' && next === '*') {
+      i += 2;
+      out += ' ';
+      while (i < n && !(source[i] === '*' && source[i + 1] === '/')) {
+        if (source[i] === '\n') out += '\n';
+        i++;
+      }
+      if (i < n) i += 2;
+    } else if (ch === '`') {
+      i++;
+      out += ' ';
+      while (i < n && source[i] !== '`') {
+        if (source[i] === '\n') out += '\n';
+        i++;
+      }
+      if (i < n) i++;
+    } else if (ch === '"' || ch === "'") {
+      const q = ch;
+      i++;
+      out += ' ';
+      while (i < n && source[i] !== q) {
+        if (source[i] === '\\' && i + 1 < n) i += 2;
+        else {
+          if (source[i] === '\n') out += '\n';
+          i++;
+        }
+      }
+      if (i < n) i++;
+    } else {
+      out += ch;
+      i++;
+    }
+  }
+  return out;
+}
+
 function extractGoTests(repoRoot, file) {
-  const source = readFileSync(join(repoRoot, file), 'utf8').replace(/^\uFEFF/, '');
+  const source = stripGoCommentsAndStrings(readRegularFileBounded(join(repoRoot, file), MAX_GO_TEST_BYTES, `test file ${file}`).replace(/^\uFEFF/, ''));
   const names = [];
   for (const m of source.matchAll(GO_TEST_RE)) {
     const name = m[1];
@@ -154,9 +290,12 @@ function run(cwd, bin, args, timeoutSec, testUser, covDir = null) {
   const env = cleanEnv();
   if (covDir) env.NODE_V8_COVERAGE = covDir;
   const argv = testUser ? wrap(testUser.user, testUser.home, bin, args, env) : { bin, args };
-  const res = runProcess(argv.bin, argv.args, {
+  const useShell = needsShell(argv.bin, cwd, env);
+  const runBin = useShell ? quoteWinShellArg(argv.bin) : argv.bin;
+  const runArgs = useShell ? argv.args.map(quoteWinShellArg) : argv.args;
+  const res = runProcess(runBin, runArgs, {
     cwd,
-    shell: needsShell(argv.bin),
+    shell: useShell,
     env,
     timeoutMs: timeoutSec * 1000,
   });
@@ -243,7 +382,6 @@ export function runTests(repoRoot, { testCommand, testFileCommand, only = null, 
 
 const MAX_COV_FILE_BYTES = 32 * 1024 * 1024;
 const MAX_COV_TOTAL_BYTES = 128 * 1024 * 1024;
-const OPEN_COV_FLAGS = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
 
 // One parsed JSON blob per regular file the run left behind. Under --test-user
 // the directory is world-writable, so entries are opened with O_NOFOLLOW |
@@ -256,7 +394,7 @@ function readV8Coverage(dir) {
     if (!name.endsWith('.json')) continue;
     let fd = null;
     try {
-      fd = openSync(join(dir, name), OPEN_COV_FLAGS);
+      fd = openSync(join(dir, name), OPEN_READ_FLAGS);
       const st = fstatSync(fd);
       if (!st.isFile() || st.size <= 0 || st.size > MAX_COV_FILE_BYTES || totalBytes + st.size > MAX_COV_TOTAL_BYTES) continue;
       const buf = Buffer.allocUnsafe(st.size);
