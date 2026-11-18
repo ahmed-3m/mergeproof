@@ -64,7 +64,7 @@ test('summarize computes rejected, decided and cleanRateWithRejections for a buc
   assert.equal(g.cleanRateWithRejections, 3 / 6); // 3 / (3 + 1 + 2)
 });
 
-test('summarize ignores closed outcomes with closedByAuthor true, null or missing', () => {
+test('summarize ignores non-rejection closed outcomes and non-closed outcomes with closedByAuthor false', () => {
   const events = Array.from({ length: 5 }, (_, i) => event({ id: `e${i}`, pr: i + 1 }));
   const base = fixtureLedger();
   const withNonRejections = {
@@ -75,6 +75,7 @@ test('summarize ignores closed outcomes with closedByAuthor true, null or missin
       outcome(10, 'closed', { closedBy: null, closedByAuthor: null }),
       outcome(11, 'closed'),
       outcome(12, 'open'),
+      outcome(13, 'open', { closedByAuthor: false }),
     ],
   };
   const [a] = summarize(events, base, { minN: 5 });
@@ -82,9 +83,21 @@ test('summarize ignores closed outcomes with closedByAuthor true, null or missin
   assert.equal(b.rejected, a.rejected);
   assert.equal(b.decided, a.decided);
   assert.equal(b.cleanRateWithRejections, a.cleanRateWithRejections);
+
+  const nonClosedLedger = {
+    schema: 'mergeproof-ledger@1',
+    outcomes: [
+      outcome(20, 'open', { closedByAuthor: false }),
+      outcome(21, 'pending', { closedByAuthor: false }),
+      outcome(22, 'clean', { closedByAuthor: false }),
+    ],
+  };
+  const [nc] = summarize(events, nonClosedLedger, { minN: 5 });
+  assert.equal(nc.rejected, 0);
+  assert.equal(nc.decided, 2); // pending + clean only
 });
 
-test('summarize sets cleanRateWithRejections to null when clean + reverted + rejected is 0', () => {
+test('summarize sets cleanRateWithRejections to null when clean + reverted + rejected is 0 and zeroes counts for null ledger', () => {
   const events = [event({ id: 'e1', pr: 1 })];
   const ledger = {
     schema: 'mergeproof-ledger@1',
@@ -100,7 +113,32 @@ test('summarize sets cleanRateWithRejections to null when clean + reverted + rej
   assert.equal(g.rejected, 0);
   assert.equal(g.decided, 1); // only pending
   assert.equal(g.cleanRateWithRejections, null);
-  assert.equal(summarize(events, null, { minN: 1 })[0].cleanRateWithRejections, null);
+
+  const [nullGroup] = summarize(events, null, { minN: 1 });
+  assert.equal(nullGroup.rejected, 0);
+  assert.equal(nullGroup.decided, 0);
+  assert.equal(nullGroup.cleanRateWithRejections, null);
+});
+
+test('summarize and formatRetro handle 0% cleanRateWithRejections and null rate at or above minN', () => {
+  const events = Array.from({ length: 5 }, (_, i) => event({ id: `e${i}`, pr: i + 1 }));
+
+  const allRejectedLedger = {
+    schema: 'mergeproof-ledger@1',
+    outcomes: [
+      outcome(1, 'closed', { closedBy: 'alice', closedByAuthor: false }),
+      outcome(2, 'closed', { closedBy: 'alice', closedByAuthor: false }),
+    ],
+  };
+  const zeroGroups = summarize(events, allRejectedLedger, { minN: 5 });
+  assert.equal(zeroGroups[0].cleanRateWithRejections, 0);
+  const zeroText = formatRetro(zeroGroups, { minN: 5 });
+  assert.match(zeroText, /  rejections: 2 rejected · 2 decided · clean with rejections 0%/);
+
+  const nullGroups = summarize(events, null, { minN: 5 });
+  assert.equal(nullGroups[0].cleanRateWithRejections, null);
+  const nullText = formatRetro(nullGroups, { minN: 5 });
+  assert.match(nullText, /  rejections: 0 rejected · 0 decided · clean with rejections -/);
 });
 
 test('formatRetro prints the rejection line at or above minN and omits it below minN', () => {

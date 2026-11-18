@@ -1,9 +1,9 @@
 // `mergeproof retro` (MP-109): summarize how the agent has been doing, per
 // (kind, agent, model, skill) bucket, from the events log apply writes
-// (MP-107) plus — for revert rates — the trust ledger. The skill string
-// already carries its version (`bugfix@4`), so each skill version earns its
-// own row. Pure counting and formatting: the command reads the files, this
-// module never does I/O.
+// (MP-107) plus — for revert rates and maintainer rejections — the trust
+// ledger. The skill string already carries its version (`bugfix@4`), so each
+// skill version earns its own row. Pure counting and formatting: the command
+// reads the files, this module never does I/O.
 
 const bucketKey = (e) => `${e.kind ?? 'unknown'}\u0000${e.agent}\u0000${e.model}\u0000${e.skill ?? 'none'}`;
 
@@ -12,8 +12,9 @@ const rate = (part, whole) => (whole.length === 0 ? null : part.length / whole.l
 /**
  * Group `events` by (kind, agent, model, skill) and count what happened.
  * With a `ledger`, each group also gets a revert rate from the settled
- * (`clean` or `reverted`) ledger outcomes of the same bucket — the events log
- * itself never decides anything about trust.
+ * (`clean` or `reverted`) outcomes and maintainer rejections from `closed`
+ * (`closedByAuthor === false`) ledger outcomes of the same bucket — the events
+ * log itself never decides anything about trust.
  * @param {object[]} events parsed events.jsonl records
  * @param {{ outcomes: object[] } | null} [ledger] the trust ledger, or null
  * @param {{ minN?: number }} [opts] groups with fewer runs are flagged insufficient (default 5)
