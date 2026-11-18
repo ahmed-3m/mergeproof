@@ -1,23 +1,25 @@
-import { chmodSync, closeSync, constants, fstatSync, mkdtempSync, openSync, readdirSync, readSync, rmSync } from 'node:fs';
+import { chmodSync, closeSync, constants, fstatSync, mkdtempSync, openSync, readdirSync, readFileSync, readSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join, posix } from 'node:path';
 import { runProcess } from './process.mjs';
 import { wrap } from './sandbox.mjs';
 import { SAFE_PATH } from '../tamper.mjs';
 
 // Test runner adapter. Results are per test file and come from exit codes, so
 // any runner works: `testFileCommand` runs one file (node --test, npx jest,
-// npx vitest run, pytest), `testCommand` runs the whole suite.
+// npx vitest run, pytest, go test, cargo test), `testCommand` runs the whole suite.
 //
 // Full-suite runs also report `count`, the number of test cases parsed from the
 // combined stdout+stderr (parseTestCount below), so the refactor proof can
 // catch a dropped test count. Pass/fail still comes from the exit code alone;
 // a count that doesn't parse is null and never fails a proof on its own.
 //
-// Commands come from the base branch's config (trusted) and are split on
-// whitespace. On Windows they run through the shell so npm/npx .cmd shims
-// resolve (CVE-2024-27980); the only untrusted argument, the test file path, is
-// checked against SAFE_PATH first.
+// Commands come from the base branch's config (trusted) and are tokenized with
+// outer `'...'` / `"..."` quotes stripped. On Windows only `.cmd`/`.bat` shims
+// (npm, npx, yarn, pnpm, *.cmd, *.bat) run through the shell (CVE-2024-27980);
+// direct binaries keep `shell: false` so regex metacharacters like `|` and `^`
+// are never mangled by cmd.exe. Any substituted path or test name is checked
+// against SAFE_PATH (or `/^Test\w*$/` for `{goTests}`) first.
 
 const SUITE = '(suite)';
 
@@ -41,18 +43,120 @@ export function cleanEnv(sourceEnv = process.env) {
   return env;
 }
 
+const WIN_SHIMS = new Set(['npm', 'npx', 'yarn', 'pnpm']);
+const HAS_PLACEHOLDER = /\{(file|dir|stem|goTests)\}/;
+const PLACEHOLDER_RE = /\{(file|dir|stem|goTests)\}/g;
+const GO_TEST_RE = /^func[ \t]+(Test[^\n(]*?)[ \t]*\(/gm;
+const SAFE_GO_TEST = /^Test\w*$/;
+
+function needsShell(bin) {
+  if (process.platform !== 'win32') return false;
+  const base = basename(bin).toLowerCase();
+  return WIN_SHIMS.has(base) || base.endsWith('.cmd') || base.endsWith('.bat');
+}
+
+// Tokenize a trusted command string on whitespace while stripping matching outer
+// `'...'` or `"..."` quotes so quoted regexes (e.g. `'^({goTests})$'`) reach
+// execFile without literal quote characters.
+function tokenizeCommand(command) {
+  const tokens = [];
+  let current = '';
+  let inToken = false;
+  let quote = null;
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i];
+    if (quote) {
+      if (ch === quote) quote = null;
+      else current += ch;
+    } else if (ch === "'" || ch === '"') {
+      quote = ch;
+      inToken = true;
+    } else if (/\s/.test(ch)) {
+      if (inToken) {
+        tokens.push(current);
+        current = '';
+        inToken = false;
+      }
+    } else {
+      current += ch;
+      inToken = true;
+    }
+  }
+  if (quote) throw new Error(`unclosed quote in command ${JSON.stringify(command)}`);
+  if (inToken) tokens.push(current);
+  if (tokens.length === 0) throw new Error('test command must not be empty');
+  return tokens;
+}
+
+function assertSafePath(value, label = 'test path') {
+  if (typeof value !== 'string' || !SAFE_PATH.test(value)) {
+    throw new Error(`refusing to run unsafe ${label} ${JSON.stringify(value)}`);
+  }
+}
+
+function normalizeSafeFile(file) {
+  assertSafePath(file, 'test path');
+  const norm = posix.normalize(file);
+  assertSafePath(norm, 'test path');
+  if (norm === '.' || norm === '..' || norm.startsWith('../')) {
+    throw new Error(`refusing to run unsafe test path ${JSON.stringify(file)}`);
+  }
+  return norm;
+}
+
+function extractGoTests(repoRoot, file) {
+  const source = readFileSync(join(repoRoot, file), 'utf8').replace(/^\uFEFF/, '');
+  const names = [];
+  for (const m of source.matchAll(GO_TEST_RE)) {
+    const name = m[1];
+    if (!SAFE_GO_TEST.test(name)) {
+      throw new Error(`refusing unsafe Go test name ${JSON.stringify(name)} in ${file}`);
+    }
+    names.push(name);
+  }
+  if (names.length === 0) {
+    throw new Error(`no Go Test* functions found in ${file}`);
+  }
+  return names.join('|');
+}
+
+function resolveTestFileArgs(repoRoot, templateArgs, file) {
+  const normFile = normalizeSafeFile(file);
+  if (!templateArgs.some((arg) => HAS_PLACEHOLDER.test(arg))) {
+    return [...templateArgs, file];
+  }
+  const values = { file: normFile };
+  for (const arg of templateArgs) {
+    for (const m of arg.matchAll(PLACEHOLDER_RE)) {
+      const name = m[1];
+      if (Object.hasOwn(values, name)) continue;
+      if (name === 'dir') {
+        const dir = posix.dirname(normFile);
+        assertSafePath(dir, '{dir} placeholder');
+        values.dir = dir;
+      } else if (name === 'stem') {
+        const stem = posix.basename(normFile, posix.extname(normFile));
+        assertSafePath(stem, '{stem} placeholder');
+        values.stem = stem;
+      } else if (name === 'goTests') {
+        values.goTests = extractGoTests(repoRoot, normFile);
+      }
+    }
+  }
+  return templateArgs.map((arg) => arg.replace(PLACEHOLDER_RE, (_, name) => values[name]));
+}
+
 // `testUser` ({ user, home }, from check --test-user) runs the command as that
 // unprivileged OS user through sudo; see sandbox.mjs. `covDir`, when set, is
 // handed to the child as NODE_V8_COVERAGE so a full-suite run leaves V8
 // coverage JSON behind for the diff-coverage proof (proof.minDiffCoverage).
-function run(cwd, command, extra, timeoutSec, testUser, covDir = null) {
-  const [bin, ...args] = command.trim().split(/\s+/);
+function run(cwd, bin, args, timeoutSec, testUser, covDir = null) {
   const env = cleanEnv();
   if (covDir) env.NODE_V8_COVERAGE = covDir;
-  const argv = testUser ? wrap(testUser.user, testUser.home, bin, [...args, ...extra], env) : { bin, args: [...args, ...extra] };
+  const argv = testUser ? wrap(testUser.user, testUser.home, bin, args, env) : { bin, args };
   const res = runProcess(argv.bin, argv.args, {
     cwd,
-    shell: process.platform === 'win32',
+    shell: needsShell(argv.bin),
     env,
     timeoutMs: timeoutSec * 1000,
   });
@@ -118,7 +222,8 @@ export function runTests(repoRoot, { testCommand, testFileCommand, only = null, 
         covDir = mkdtempSync(join(tmpdir(), 'mp-v8cov-'));
         if (testUser) chmodSync(covDir, 0o1777);
       }
-      const { ok, output } = run(repoRoot, testCommand, [], timeoutSec, testUser, covDir);
+      const [bin, ...args] = tokenizeCommand(testCommand);
+      const { ok, output } = run(repoRoot, bin, args, timeoutSec, testUser, covDir);
       (ok ? passed : failed).push(SUITE);
       const result = { passed, failed, count: parseTestCount(output) };
       if (covDir) result.v8Coverage = readV8Coverage(covDir);
@@ -127,9 +232,11 @@ export function runTests(repoRoot, { testCommand, testFileCommand, only = null, 
       if (covDir) rmSync(covDir, { recursive: true, force: true });
     }
   }
+  if (only.length === 0) return { passed, failed };
+  const [bin, ...templateArgs] = tokenizeCommand(testFileCommand);
   for (const file of only) {
-    if (!SAFE_PATH.test(file)) throw new Error(`refusing to run unsafe test path ${JSON.stringify(file)}`);
-    (run(repoRoot, testFileCommand, [file], timeoutSec, testUser).ok ? passed : failed).push(file);
+    const args = resolveTestFileArgs(repoRoot, templateArgs, file);
+    (run(repoRoot, bin, args, timeoutSec, testUser).ok ? passed : failed).push(file);
   }
   return { passed, failed };
 }
